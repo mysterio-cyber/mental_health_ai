@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-# Paste your YouTube binaural beat link here
+# Your YouTube binaural beat link
 BINAURAL_BEAT_LINK = "https://youtu.be/lkkGlVWvkLk?si=bl55Oy6iUc2wnoEK"
 
 html_page = """
@@ -21,7 +21,6 @@ body {
     min-height: 100vh;
     margin: 0;
 }
-
 .container {
     background: white;
     padding: 40px;
@@ -31,13 +30,11 @@ body {
     overflow-y: auto;
     max-height: 90vh;
 }
-
 h2 {
     text-align: center;
     color: #333;
     margin-bottom: 25px;
 }
-
 .card {
     background: #f9f9f9;
     padding: 20px;
@@ -45,13 +42,11 @@ h2 {
     border-radius: 15px;
     box-shadow: 0 5px 15px rgba(0,0,0,0.05);
 }
-
 label {
     display: block;
     margin: 10px 0;
     color: #555;
 }
-
 button {
     width: 100%;
     padding: 15px;
@@ -63,11 +58,9 @@ button {
     cursor: pointer;
     transition: 0.3s;
 }
-
 button:hover {
     opacity: 0.9;
 }
-
 .result {
     margin-top: 25px;
     font-size: 20px;
@@ -75,7 +68,6 @@ button:hover {
     text-align: center;
     color: #333;
 }
-
 .remedies {
     margin-top: 15px;
     padding: 15px;
@@ -83,7 +75,6 @@ button:hover {
     border-radius: 10px;
     color: #222;
 }
-
 iframe {
     margin-top: 20px;
     width: 100%;
@@ -109,7 +100,7 @@ iframe {
     {% endfor %}
 </div>
 {% endfor %}
-<button type="button" onclick="submitForm()">Submit</button>
+<button type="button" id="submitBtn">Submit</button>
 </form>
 
 <div class="result" id="result"></div>
@@ -118,11 +109,11 @@ iframe {
 <iframe src="{{ binaural_beat }}" allow="autoplay; encrypted-media"></iframe>
 
 <script>
-function submitForm() {
+document.getElementById("submitBtn").addEventListener("click", function() {
     let answers = {};
     {% for q in questions %}
-    let val = document.querySelector('input[name="{{ q.id }}"]:checked');
-    answers["{{ q.id }}"] = val ? parseInt(val.value) : 0;
+    let selected = document.querySelector('input[name="{{ q.id }}"]:checked');
+    answers["{{ q.id }}"] = selected ? parseInt(selected.value) : 0;
     {% endfor %}
 
     fetch("/assess", {
@@ -130,13 +121,16 @@ function submitForm() {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(answers)
     })
-    .then(res => res.json())
+    .then(response => response.json())
     .then(data => {
         document.getElementById("result").innerHTML = "Mental Health Status: " + data.status;
         document.getElementById("remedies").innerHTML = "<strong>Remedies / Tips:</strong><br>" + data.remedies.join("<br>");
     })
-    .catch(err => console.error(err));
-}
+    .catch(err => {
+        console.error("Error:", err);
+        document.getElementById("result").innerHTML = "An error occurred. Please try again.";
+    });
+});
 </script>
 
 </div>
