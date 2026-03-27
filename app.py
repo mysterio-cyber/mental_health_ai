@@ -3,16 +3,18 @@ import os
 
 app = Flask(__name__)
 
-# HTML template with calming colors and card-style sliders
+# Paste your YouTube binaural beat link here
+BINAURAL_BEAT_LINK = "https://youtu.be/lkkGlVWvkLk?si=bl55Oy6iUc2wnoEK"
+
 html_page = """
 <!DOCTYPE html>
 <html>
 <head>
-<title>🧘‍♀️ Peaceful Mental Health Assessment</title>
+<title>🧘‍♀️ Mental Health Assessment</title>
 <style>
 body {
     font-family: 'Arial', sans-serif;
-    background: linear-gradient(135deg, #a1c4fd, #c2e9fb);
+    background: linear-gradient(135deg,#a1c4fd,#c2e9fb);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -41,32 +43,19 @@ h2 {
     padding: 20px;
     margin-bottom: 15px;
     border-radius: 15px;
-    transition: 0.3s;
     box-shadow: 0 5px 15px rgba(0,0,0,0.05);
-}
-
-.card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
 }
 
 label {
     display: block;
-    font-weight: bold;
-    margin-bottom: 8px;
+    margin: 10px 0;
     color: #555;
-}
-
-input[type=range] {
-    width: 100%;
-    margin-bottom: 5px;
-    accent-color: #6dd5ed;
 }
 
 button {
     width: 100%;
     padding: 15px;
-    background: linear-gradient(to right, #2193b0, #6dd5ed);
+    background: linear-gradient(to right,#2193b0,#6dd5ed);
     color: white;
     border: none;
     border-radius: 12px;
@@ -81,71 +70,59 @@ button:hover {
 
 .result {
     margin-top: 25px;
-    font-size: 22px;
+    font-size: 20px;
     font-weight: bold;
     text-align: center;
     color: #333;
 }
 
-/* Progress bar */
-.progress-container {
-    width: 100%;
-    background: #eee;
+.remedies {
+    margin-top: 15px;
+    padding: 15px;
+    background: #eef;
     border-radius: 10px;
-    margin-bottom: 20px;
+    color: #222;
 }
 
-.progress-bar {
-    height: 10px;
-    background: linear-gradient(to right, #2193b0, #6dd5ed);
-    width: 0%;
-    border-radius: 10px;
-    transition: width 0.3s ease;
+iframe {
+    margin-top: 20px;
+    width: 100%;
+    height: 200px;
+    border: none;
+    border-radius: 15px;
 }
 </style>
 </head>
 <body>
 
 <div class="container">
-<h2>🧘‍♂️ Peaceful Mental Health Assessment</h2>
-
-<div class="progress-container">
-    <div class="progress-bar" id="progress-bar"></div>
-</div>
+<h2>🧘 AI Based Mental Health Risk Assessment System </h2>
 
 <form id="questionnaire">
-    {% for q in questions %}
-    <div class="card question">
-        <label for="{{ q.id }}">{{ loop.index }}. {{ q.label }}</label>
-        <input type="range" id="{{ q.id }}" min="0" max="3" value="0" step="1" oninput="updateProgress()">
-        <div style="display:flex; justify-content: space-between; font-size:12px;">
-            {% for option in q.options %}
-            <span>{{ option }}</span>
-            {% endfor %}
-        </div>
-    </div>
+{% for q in questions %}
+<div class="card">
+    <p><strong>{{ loop.index }}. {{ q.label }}</strong></p>
+    {% for opt in q.options %}
+    <label>
+        <input type="radio" name="{{ q.id }}" value="{{ loop.index0 }}"> {{ opt }}
+    </label>
     {% endfor %}
-    <button type="button" onclick="submitForm()">Submit</button>
+</div>
+{% endfor %}
+<button type="button" onclick="submitForm()">Submit</button>
 </form>
 
 <div class="result" id="result"></div>
-</div>
+<div class="remedies" id="remedies"></div>
+
+<iframe src="{{ binaural_beat }}" allow="autoplay; encrypted-media"></iframe>
 
 <script>
-function updateProgress() {
-    let total = {{ questions|length }};
-    let answered = 0;
-    {% for q in questions %}
-    if(document.getElementById("{{ q.id }}").value != "0") answered++;
-    {% endfor %}
-    let percent = (answered / total) * 100;
-    document.getElementById("progress-bar").style.width = percent + "%";
-}
-
 function submitForm() {
     let answers = {};
     {% for q in questions %}
-    answers["{{ q.id }}"] = parseInt(document.getElementById("{{ q.id }}").value) || 0;
+    let val = document.querySelector('input[name="{{ q.id }}"]:checked');
+    answers["{{ q.id }}"] = val ? parseInt(val.value) : 0;
     {% endfor %}
 
     fetch("/assess", {
@@ -156,26 +133,27 @@ function submitForm() {
     .then(res => res.json())
     .then(data => {
         document.getElementById("result").innerHTML = "Mental Health Status: " + data.status;
+        document.getElementById("remedies").innerHTML = "<strong>Remedies / Tips:</strong><br>" + data.remedies.join("<br>");
     })
     .catch(err => console.error(err));
 }
 </script>
 
+</div>
 </body>
 </html>
 """
 
-# Questions
 questions = [
     {"id":"stress","label":"How often do you feel stressed?","options":["Never","Sometimes","Often","Always"]},
     {"id":"sleep","label":"How is your sleep quality?","options":["Very Good","Good","Poor","Very Poor"]},
-    {"id":"exercise","label":"How much do you exercise per week?","options":[">150 min","60-150 min","1-59 min","0 min"]},
+    {"id":"exercise","label":"How often do you exercise per week?","options":[">150 min","60-150 min","1-59 min","0 min"]},
     {"id":"mood","label":"How often do you feel sad or down?","options":["Never","Sometimes","Often","Always"]},
     {"id":"anxiety","label":"How often do you feel anxious or nervous?","options":["Never","Sometimes","Often","Always"]},
-    {"id":"focus","label":"How often do you have trouble concentrating?","options":["Never","Sometimes","Often","Always"]},
-    {"id":"irritability","label":"How often do you feel irritable?","options":["Never","Sometimes","Often","Always"]},
-    {"id":"social","label":"How often do you avoid social interactions?","options":["Never","Sometimes","Often","Always"]},
-    {"id":"motivation","label":"How motivated are you to do daily tasks?","options":["High","Moderate","Low","Very Low"]},
+    {"id":"focus","label":"Do you have trouble concentrating?","options":["Never","Sometimes","Often","Always"]},
+    {"id":"irritability","label":"Do you feel irritable frequently?","options":["Never","Sometimes","Often","Always"]},
+    {"id":"social","label":"Do you avoid social interactions?","options":["Never","Sometimes","Often","Always"]},
+    {"id":"motivation","label":"How motivated are you for daily tasks?","options":["High","Moderate","Low","Very Low"]},
     {"id":"appetite","label":"How is your appetite?","options":["Good","Normal","Poor","Very Poor"]},
     {"id":"energy","label":"How is your energy level?","options":["High","Moderate","Low","Very Low"]},
     {"id":"sleep_duration","label":"How many hours do you sleep on average?","options":["8+","6-7","4-5","<4"]}
@@ -183,34 +161,38 @@ questions = [
 
 @app.route("/")
 def home():
-    return render_template_string(html_page, questions=questions)
+    return render_template_string(html_page, questions=questions, binaural_beat=BINAURAL_BEAT_LINK)
 
 @app.route("/assess", methods=["POST"])
 def assess():
     data = request.get_json()
     score = 0
-
     for key, value in data.items():
         try:
             value = int(value)
         except:
             value = 0
-
+        # invert score for healthy behaviors
         if key in ["sleep","exercise","motivation","appetite","energy","sleep_duration"]:
             score += 3 - value
         else:
             score += value
 
+    # Determine risk and remedies
     if score <= 10:
         status = "Stable 🟢"
+        remedies = ["Keep up the healthy routine!", "Maintain regular sleep and exercise.", "Practice mindfulness or meditation daily."]
     elif score <= 20:
         status = "Mild Risk 🟡"
+        remedies = ["Reduce stress with short breaks.", "Engage in light exercise.", "Talk to friends or loved ones regularly.", "Consider journaling."]
     elif score <= 30:
         status = "Moderate Risk 🟠"
+        remedies = ["Incorporate relaxation techniques like yoga.", "Maintain a consistent sleep schedule.", "Limit caffeine and screen time before bed.", "Consider speaking to a counselor."]
     else:
         status = "High Risk 🔴"
+        remedies = ["Seek professional mental health support.", "Practice daily self-care routines.", "Avoid social isolation.", "Consider therapy or counseling sessions immediately."]
 
-    return jsonify({"status": status})
+    return jsonify({"status": status, "remedies": remedies})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
