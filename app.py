@@ -3,11 +3,11 @@ import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = "secret123"
+app.secret_key = "supersecretkey"
 
 # ---------------- DATABASE ----------------
 def init_db():
-    conn = sqlite3.connect("users.db")
+    conn = sqlite3.connect("app.db")
     cur = conn.cursor()
 
     cur.execute("""
@@ -36,86 +36,87 @@ init_db()
 questions = [
     {"id":"stress","label":"How often do you feel stressed?"},
     {"id":"sleep","label":"How is your sleep quality?"},
-    {"id":"exercise","label":"How often do you exercise per week?"},
-    {"id":"mood","label":"How often do you feel sad or down?"},
+    {"id":"exercise","label":"How often do you exercise?"},
+    {"id":"mood","label":"How often do you feel sad?"},
     {"id":"anxiety","label":"How often do you feel anxious?"},
     {"id":"focus","label":"Do you have trouble concentrating?"},
-    {"id":"social","label":"Do you avoid social interactions?"},
+    {"id":"social","label":"Do you avoid social interaction?"},
     {"id":"motivation","label":"How motivated are you?"},
     {"id":"energy","label":"How is your energy level?"}
 ]
 
-# ---------------- LOGIN ----------------
-@app.route("/login", methods=["GET","POST"])
-def login():
-    if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-
-        conn = sqlite3.connect("users.db")
-        cur = conn.cursor()
-        cur.execute("SELECT password FROM users WHERE username=?", (username,))
-        user = cur.fetchone()
-        conn.close()
-
-        if user and check_password_hash(user[0], password):
-            session["user"] = username
-            return redirect("/")
-        else:
-            return "Invalid credentials"
-
-    return '''
-    <style>
-    body{background:#667eea;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif}
-    .box{background:white;padding:30px;border-radius:15px;width:300px}
-    input,button{width:100%;padding:10px;margin:10px 0}
-    </style>
-    <div class="box">
-    <h2>Login</h2>
-    <form method="post">
-    <input name="username" placeholder="Username" required>
-    <input type="password" name="password" placeholder="Password" required>
-    <button>Login</button>
-    </form>
-    <a href="/signup">Signup</a>
-    </div>
-    '''
+BINAURAL = "https://youtu.be/lkkGlVWvkLk"
 
 # ---------------- SIGNUP ----------------
 @app.route("/signup", methods=["GET","POST"])
 def signup():
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-
-        hashed = generate_password_hash(password)
+        u = request.form["username"]
+        p = generate_password_hash(request.form["password"])
 
         try:
-            conn = sqlite3.connect("users.db")
+            conn = sqlite3.connect("app.db")
             cur = conn.cursor()
-            cur.execute("INSERT INTO users (username,password) VALUES (?,?)",(username,hashed))
+            cur.execute("INSERT INTO users (username,password) VALUES (?,?)",(u,p))
             conn.commit()
             conn.close()
             return redirect("/login")
         except:
-            return "User already exists"
+            return "User exists"
 
-    return '''
+    return """
     <style>
-    body{background:#43cea2;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif}
-    .box{background:white;padding:30px;border-radius:15px;width:300px}
-    input,button{width:100%;padding:10px;margin:10px 0}
+    body{background:linear-gradient(135deg,#a1c4fd,#c2e9fb);display:flex;justify-content:center;align-items:center;height:100vh;}
+    .box{background:white;padding:30px;border-radius:20px;width:300px;text-align:center;}
+    input,button{width:100%;padding:10px;margin:10px 0;}
+    button{background:#2193b0;color:white;border:none;}
     </style>
     <div class="box">
-    <h2>Signup</h2>
+    <h2>Signup 🌿</h2>
     <form method="post">
-    <input name="username" placeholder="Username" required>
-    <input type="password" name="password" placeholder="Password" required>
+    <input name="username" required placeholder="Username">
+    <input name="password" type="password" required placeholder="Password">
     <button>Signup</button>
     </form>
     <a href="/login">Login</a>
     </div>
-    '''
+    """
+
+# ---------------- LOGIN ----------------
+@app.route("/login", methods=["GET","POST"])
+def login():
+    if request.method == "POST":
+        u = request.form["username"]
+        p = request.form["password"]
+
+        conn = sqlite3.connect("app.db")
+        cur = conn.cursor()
+        cur.execute("SELECT password FROM users WHERE username=?",(u,))
+        user = cur.fetchone()
+        conn.close()
+
+        if user and check_password_hash(user[0],p):
+            session["user"]=u
+            return redirect("/")
+        return "Invalid login"
+
+    return """
+    <style>
+    body{background:linear-gradient(135deg,#89f7fe,#66a6ff);display:flex;justify-content:center;align-items:center;height:100vh;}
+    .box{background:white;padding:30px;border-radius:20px;width:300px;text-align:center;}
+    input,button{width:100%;padding:10px;margin:10px 0;}
+    button{background:#66a6ff;color:white;border:none;}
+    </style>
+    <div class="box">
+    <h2>Login 🌿</h2>
+    <form method="post">
+    <input name="username" required>
+    <input name="password" type="password" required>
+    <button>Login</button>
+    </form>
+    <a href="/signup">Signup</a>
+    </div>
+    """
 
 # ---------------- HOME ----------------
 @app.route("/")
@@ -124,78 +125,92 @@ def home():
         return redirect("/login")
 
     return render_template_string("""
-    <h3>Welcome {{session['user']}}</h3>
-    <a href="/logout">Logout</a> | <a href="/history">History</a>
-    <hr>
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body{background:#eef;font-family:sans-serif;text-align:center;padding:20px;}
+.container{background:white;padding:20px;border-radius:15px;}
+button{padding:10px;margin-top:10px;background:#2193b0;color:white;border:none;}
+</style>
+</head>
+<body>
 
-    <h2>Mental Health Test</h2>
-    <form id="form">
-    {% for q in questions %}
-        <p>{{q.label}}</p>
-        {% for i in range(1,6) %}
-            <input type="radio" name="{{q.id}}" value="{{i}}" required> {{i}}
-        {% endfor %}
-    {% endfor %}
-    <br><br>
-    <button type="button" onclick="submitForm()">Submit</button>
-    </form>
+<h3>Welcome {{session['user']}}</h3>
+<a href="/history">History</a> | <a href="/logout">Logout</a>
 
-    <div id="result"></div>
+<div class="container">
+<div id="q"></div>
+<div id="opt"></div>
+<button onclick="next()">Next</button>
+<div id="res"></div>
+</div>
 
-    <script>
-    function submitForm(){
-        let data = {};
-        document.querySelectorAll("input:checked").forEach(el=>{
-            data[el.name] = parseInt(el.value);
-        });
+<script>
+const q={{questions|tojson}};
+let i=0,ans={};
 
-        fetch('/assess',{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(data)
-        })
-        .then(res=>res.json())
-        .then(d=>{
-            document.getElementById('result').innerHTML =
-                "<h3 style='color:"+d.color+"'>"+d.status+"</h3>";
-        });
-    }
-    </script>
-    """, questions=questions)
+function load(){
+let x=q[i];
+document.getElementById("q").innerHTML="<h3>"+x.label+"</h3>";
+let h="";
+for(let j=1;j<=5;j++){
+h+=`<input type="radio" name="a" value="${j}">${j}<br>`;
+}
+document.getElementById("opt").innerHTML=h;
+}
+load();
+
+function next(){
+let v=document.querySelector("input[name=a]:checked");
+if(!v){alert("select");return;}
+ans[q[i].id]=parseInt(v.value);
+
+if(i<q.length-1){i++;load();}
+else{
+fetch("/assess",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(ans)})
+.then(r=>r.json()).then(d=>{
+document.getElementById("res").innerHTML=
+`<h2 style="color:${d.color}">${d.status}</h2>
+Score:${d.score}<br>${d.remedies.join("<br>")}
+<br><a href="${d.link}" target="_blank">🎧 Relax</a>`;
+});
+}
+}
+</script>
+
+</body>
+</html>
+""",questions=questions)
 
 # ---------------- ASSESS ----------------
 @app.route("/assess", methods=["POST"])
 def assess():
-    data = request.get_json()
-    score = 0
-
-    positive = ["sleep","exercise","motivation","energy"]
+    data=request.get_json()
+    score=0
+    positive=["sleep","exercise","motivation","energy"]
 
     for k,v in data.items():
-        if k in positive:
-            score += (6 - v)
-        else:
-            score += v
+        score+= (6-v if k in positive else v)
 
-    max_score = len(data) * 5
+    max_score=len(data)*5
 
-    if score <= max_score * 0.25:
-        status, color = "Stable 🟢","#0a0"
-    elif score <= max_score * 0.5:
-        status, color = "Mild 🟡","#e6b800"
-    elif score <= max_score * 0.75:
-        status, color = "Moderate 🟠","#ff8800"
-    else:
-        status, color = "High 🔴","#f00"
+    if score<=max_score*0.25: status,color="Stable 🟢","#0a0"
+    elif score<=max_score*0.5: status,color="Mild 🟡","#e6b800"
+    elif score<=max_score*0.75: status,color="Moderate 🟠","#f80"
+    else: status,color="High 🔴","#f00"
 
-    conn = sqlite3.connect("users.db")
-    cur = conn.cursor()
+    conn=sqlite3.connect("app.db")
+    cur=conn.cursor()
     cur.execute("INSERT INTO results (username,score,status) VALUES (?,?,?)",
                 (session["user"],score,status))
     conn.commit()
     conn.close()
 
-    return jsonify({"status":status,"color":color})
+    remedies=["Maintain routine","Exercise","Sleep well"]
+
+    return jsonify({"status":status,"color":color,"score":score,"remedies":remedies,"link":BINAURAL})
 
 # ---------------- HISTORY ----------------
 @app.route("/history")
@@ -203,28 +218,31 @@ def history():
     if "user" not in session:
         return redirect("/login")
 
-    conn = sqlite3.connect("users.db")
-    cur = conn.cursor()
-    cur.execute("SELECT score,status FROM results WHERE username=?",(session["user"],))
-    rows = cur.fetchall()
+    conn=sqlite3.connect("app.db")
+    cur=conn.cursor()
+    cur.execute("SELECT score FROM results WHERE username=?",(session["user"],))
+    data=[r[0] for r in cur.fetchall()]
     conn.close()
 
-    html = "<h2>Your History</h2><a href='/'>Back</a><hr>"
-    for r in rows:
-        html += f"<p>Score: {r[0]} | Status: {r[1]}</p>"
-
-    return html
+    return f"""
+    <h2>History</h2>
+    <canvas id='c'></canvas>
+    <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+    <script>
+    new Chart(document.getElementById('c'),{{
+    type:'line',
+    data:{{labels:{list(range(len(data)))},datasets:[{{data:{data}}}]}}
+    }});
+    </script>
+    <a href='/'>Back</a>
+    """
 
 # ---------------- LOGOUT ----------------
-
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/login")
 
 # ---------------- RUN ----------------
-if __name__ == "__main__":
-    import os
-
-port = int(os.environ.get("PORT", 5000))
-app.run(host="0.0.0.0", port=port)
+if __name__=="__main__":
+    app.run(debug=True)
