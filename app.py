@@ -3,24 +3,25 @@ import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 import random
 import string
+import os
 
 app = Flask(__name__)
-app.secret_key = "supersecretkey"
+# FIX 1: Use env var for secret key so sessions persist properly across restarts
+app.secret_key = os.environ.get("SECRET_KEY", "dev-fallback-change-in-production-" + "x"*32)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = False  # Set True if HTTPS
 
 # ---------------- DATABASE ----------------
 def init_db():
     conn = sqlite3.connect("app.db")
     cur = conn.cursor()
-
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
         mobile TEXT,
         password TEXT
-    )
-    """)
-
+    )""")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS results (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,19 +29,14 @@ def init_db():
         score INTEGER,
         status TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    # OTP storage (in-memory for demo; in production use Redis/DB)
+    )""")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS otp_store (
         mobile TEXT PRIMARY KEY,
         otp TEXT,
         username TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
+    )""")
     conn.commit()
     conn.close()
 
@@ -60,6 +56,28 @@ questions = [
 ]
 
 BINAURAL = "https://youtu.be/lkkGlVWvkLk"
+
+# -------- OPTIONAL: Twilio SMS (set env vars to enable) --------
+def send_otp_sms(mobile, otp):
+    """
+    To enable real SMS: pip install twilio
+    Set env vars: TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM
+    """
+    sid   = os.environ.get("TWILIO_SID")
+    token = os.environ.get("TWILIO_TOKEN")
+    from_ = os.environ.get("TWILIO_FROM")
+    if sid and token and from_:
+        try:
+            from twilio.rest import Client
+            Client(sid, token).messages.create(
+                body=f"Your MindSpace OTP is: {otp}",
+                from_=from_,
+                to=f"+91{mobile}" if not mobile.startswith("+") else mobile
+            )
+            return True
+        except Exception as e:
+            print(f"SMS error: {e}")
+    return False  # Falls back to demo display
 
 # ---------------- SHARED STYLES ----------------
 BASE_STYLES = """
@@ -294,7 +312,7 @@ function makeParticles() {
 makeParticles();
 """
 
-# ---------------- SIGNUP (Step 1: Username + Mobile) ----------------
+# ---------------- SIGNUP (Step 1) ----------------
 @app.route("/signup", methods=["GET","POST"])
 def signup():
     error = ""
@@ -307,7 +325,6 @@ def signup():
         elif not m.isdigit() or len(m) < 10:
             error = "⚠️ Enter a valid mobile number."
         else:
-            # Check if username exists
             conn = sqlite3.connect("app.db")
             cur = conn.cursor()
             cur.execute("SELECT id FROM users WHERE username=?", (u,))
@@ -316,17 +333,19 @@ def signup():
             if existing:
                 error = "⚠️ Username already exists. Try another one."
             else:
-                # Generate OTP (demo: always 123456 or random 6 digits)
                 otp = ''.join(random.choices(string.digits, k=6))
                 conn = sqlite3.connect("app.db")
                 cur = conn.cursor()
                 cur.execute("INSERT OR REPLACE INTO otp_store (mobile, otp, username) VALUES (?,?,?)", (m, otp, u))
                 conn.commit()
                 conn.close()
-                # In real app: send SMS. Here we show it for demo.
+                sms_sent = send_otp_sms(m, otp)
                 session['pending_mobile'] = m
                 session['pending_username'] = u
-                session['demo_otp'] = otp  # Remove in production!
+                # FIX 2: Always store demo OTP in session for display
+                # In production with Twilio configured, you'd remove this
+                session['demo_otp'] = otp
+                session['sms_sent'] = sms_sent
                 return redirect("/verify-otp")
 
     return render_template_string("""
@@ -336,23 +355,18 @@ def signup():
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MindSpace — Sign Up</title>
-<style>
-{{ styles }}
-</style>
+<style>{{ styles }}</style>
 </head>
 <body>
 <div class="card">
     <h2>MindSpace 🌿</h2>
     <p class="subtitle">Create your account to begin your wellness journey ✨</p>
-
     <div class="step-indicator">
         <div class="step-dot active"></div>
         <div class="step-dot"></div>
         <div class="step-dot"></div>
     </div>
-
     <div style="color:rgba(255,255,255,0.5);font-size:0.78rem;margin-bottom:16px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Step 1 — Your Details</div>
-
     {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
     <form method="post" autocomplete="off">
         <div class="input-group">
@@ -374,25 +388,40 @@ def signup():
 # ---------------- VERIFY OTP (Step 2) ----------------
 @app.route("/verify-otp", methods=["GET","POST"])
 def verify_otp():
-    if 'pending_mobile' not in session:
+    # FIX 3: Better session check with clear redirect
+    if 'pending_mobile' not in session or 'pending_username' not in session:
         return redirect("/signup")
 
     error = ""
-    demo_otp = session.get('demo_otp','')
+    demo_otp = session.get('demo_otp', '')
+    sms_sent = session.get('sms_sent', False)
 
     if request.method == "POST":
         entered = request.form.get("otp","").strip()
-        conn = sqlite3.connect("app.db")
-        cur = conn.cursor()
-        cur.execute("SELECT otp FROM otp_store WHERE mobile=?", (session['pending_mobile'],))
-        row = cur.fetchone()
-        conn.close()
 
-        if row and row[0] == entered:
-            session['otp_verified'] = True
-            return redirect("/set-password")
+        if not entered or len(entered) != 6:
+            error = "❌ Please enter the complete 6-digit OTP."
         else:
-            error = "❌ Invalid OTP. Please try again."
+            # FIX 4: Fetch OTP from DB and compare — this was correct, but
+            # now we also verify the username matches to prevent session confusion
+            conn = sqlite3.connect("app.db")
+            cur = conn.cursor()
+            cur.execute("SELECT otp, username FROM otp_store WHERE mobile=?",
+                        (session['pending_mobile'],))
+            row = cur.fetchone()
+            conn.close()
+
+            if row and row[0] == entered and row[1] == session['pending_username']:
+                session['otp_verified'] = True
+                # Clear OTP from DB after use (one-time use)
+                conn = sqlite3.connect("app.db")
+                cur = conn.cursor()
+                cur.execute("DELETE FROM otp_store WHERE mobile=?", (session['pending_mobile'],))
+                conn.commit()
+                conn.close()
+                return redirect("/set-password")
+            else:
+                error = "❌ Invalid OTP. Please try again."
 
     return render_template_string("""
 <!DOCTYPE html>
@@ -414,20 +443,11 @@ def verify_otp():
     text-align: center;
 }
 .otp-demo strong { font-size: 1.4rem; letter-spacing: 6px; display: block; margin-top: 4px; }
-.otp-inputs {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
-    margin-bottom: 20px;
-}
+.otp-inputs { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
 .otp-inputs input {
-    width: 48px !important;
-    height: 56px;
-    text-align: center;
-    font-size: 1.4rem;
-    font-weight: 800;
-    padding: 0 !important;
-    border-radius: 12px !important;
+    width: 48px !important; height: 56px;
+    text-align: center; font-size: 1.4rem; font-weight: 800;
+    padding: 0 !important; border-radius: 12px !important;
 }
 </style>
 </head>
@@ -435,17 +455,20 @@ def verify_otp():
 <div class="card">
     <h2>Verify OTP 📲</h2>
     <p class="subtitle">OTP sent to {{ mobile }}</p>
-
     <div class="step-indicator">
         <div class="step-dot done"></div>
         <div class="step-dot active"></div>
         <div class="step-dot"></div>
     </div>
 
+    {% if not sms_sent %}
     <div class="otp-demo">
         🧪 Demo Mode — Your OTP is:
         <strong>{{ demo_otp }}</strong>
     </div>
+    {% else %}
+    <div class="success-msg">✅ OTP sent to your mobile number!</div>
+    {% endif %}
 
     {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
 
@@ -468,28 +491,42 @@ def verify_otp():
 const boxes = document.querySelectorAll('.otp-box');
 boxes.forEach((box, i) => {
     box.addEventListener('input', e => {
+        // Only allow digits
+        box.value = box.value.replace(/[^0-9]/g, '');
         if (box.value && i < boxes.length - 1) boxes[i+1].focus();
         updateHidden();
     });
     box.addEventListener('keydown', e => {
         if (e.key === 'Backspace' && !box.value && i > 0) boxes[i-1].focus();
     });
+    // Handle paste
+    box.addEventListener('paste', e => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g,'');
+        [...text.slice(0,6)].forEach((ch, idx) => {
+            if (boxes[idx]) boxes[idx].value = ch;
+        });
+        updateHidden();
+        const next = Math.min(text.length, 5);
+        boxes[next].focus();
+    });
 });
 function updateHidden() {
     document.getElementById('otpHidden').value = Array.from(boxes).map(b=>b.value).join('');
 }
-document.getElementById('otpForm').addEventListener('submit', e => {
-    updateHidden();
-});
+document.getElementById('otpForm').addEventListener('submit', e => { updateHidden(); });
 </script>
 </body>
 </html>
-""", styles=BASE_STYLES, particles=PARTICLES_JS, mobile=session.get('pending_mobile',''), demo_otp=demo_otp, error=error)
+""", styles=BASE_STYLES, particles=PARTICLES_JS,
+     mobile=session.get('pending_mobile',''),
+     demo_otp=demo_otp, sms_sent=sms_sent, error=error)
 
 
 # ---------------- SET PASSWORD (Step 3) ----------------
 @app.route("/set-password", methods=["GET","POST"])
 def set_password():
+    # FIX 5: Both guards must pass
     if not session.get('otp_verified') or 'pending_username' not in session:
         return redirect("/signup")
 
@@ -506,18 +543,27 @@ def set_password():
             try:
                 conn = sqlite3.connect("app.db")
                 cur = conn.cursor()
-                cur.execute("INSERT INTO users (username, mobile, password) VALUES (?,?,?)",
-                            (session['pending_username'], session['pending_mobile'], hashed))
-                conn.commit()
-                conn.close()
-                # Clean up
-                session.pop('pending_mobile', None)
-                session.pop('pending_username', None)
-                session.pop('otp_verified', None)
-                session.pop('demo_otp', None)
-                return redirect("/login?registered=1")
+                # FIX 6: Check username collision before inserting
+                cur.execute("SELECT id FROM users WHERE username=?", (session['pending_username'],))
+                if cur.fetchone():
+                    conn.close()
+                    error = "⚠️ Username already taken. Please restart signup."
+                else:
+                    cur.execute("INSERT INTO users (username, mobile, password) VALUES (?,?,?)",
+                                (session['pending_username'], session['pending_mobile'], hashed))
+                    conn.commit()
+                    conn.close()
+                    # Save username before clearing session
+                    registered_user = session['pending_username']
+                    session.pop('pending_mobile', None)
+                    session.pop('pending_username', None)
+                    session.pop('otp_verified', None)
+                    session.pop('demo_otp', None)
+                    session.pop('sms_sent', None)
+                    return redirect("/login?registered=1")
             except Exception as ex:
-                error = "⚠️ Username already exists."
+                print(f"Signup error: {ex}")
+                error = "⚠️ An error occurred. Please try again."
 
     return render_template_string("""
 <!DOCTYPE html>
@@ -532,13 +578,11 @@ def set_password():
 <div class="card">
     <h2>Set Password 🔐</h2>
     <p class="subtitle">Almost there! Choose a secure password.</p>
-
     <div class="step-indicator">
         <div class="step-dot done"></div>
         <div class="step-dot done"></div>
         <div class="step-dot active"></div>
     </div>
-
     {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
     <form method="post" autocomplete="off">
         <div class="input-group">
@@ -565,17 +609,24 @@ def login():
         success = "🎉 Account created! Please log in."
 
     if request.method == "POST":
-        u = request.form["username"]
-        p = request.form["password"]
-        conn = sqlite3.connect("app.db")
-        cur = conn.cursor()
-        cur.execute("SELECT password FROM users WHERE username=?",(u,))
-        user = cur.fetchone()
-        conn.close()
-        if user and check_password_hash(user[0],p):
-            session["user"]=u
-            return redirect("/")
-        error = "❌ Invalid username or password."
+        u = request.form.get("username","").strip()
+        p = request.form.get("password","")
+
+        if not u or not p:
+            error = "⚠️ Please enter both username and password."
+        else:
+            conn = sqlite3.connect("app.db")
+            cur = conn.cursor()
+            cur.execute("SELECT password FROM users WHERE username=?", (u,))
+            user = cur.fetchone()
+            conn.close()
+            # FIX 7: More informative — won't help attacker since both cases say "invalid"
+            if user and check_password_hash(user[0], p):
+                session.clear()  # Clear any stale session data first
+                session["user"] = u
+                return redirect("/")
+            else:
+                error = "❌ Invalid username or password."
 
     return render_template_string("""
 <!DOCTYPE html>
@@ -584,9 +635,7 @@ def login():
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MindSpace — Login</title>
-<style>
-{{ styles }}
-</style>
+<style>{{ styles }}</style>
 </head>
 <body>
 <div class="card">
@@ -611,13 +660,12 @@ def login():
 """, styles=BASE_STYLES, particles=PARTICLES_JS, error=error, success=success)
 
 
-# ---------------- HOME ----------------
+# ---------------- HOME (with Solar System) ----------------
 @app.route("/")
 def home():
     if "user" not in session:
         return redirect("/login")
 
-    # Get last score
     conn = sqlite3.connect("app.db")
     cur = conn.cursor()
     cur.execute("SELECT score, status FROM results WHERE username=? ORDER BY id DESC LIMIT 1", (session["user"],))
@@ -668,27 +716,31 @@ body {
     transition: background 0.4s;
 }
 
+/* ===== SOLAR SYSTEM BACKGROUND ===== */
+#solar-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.55;
+}
+
+body.light-mode #solar-canvas { opacity: 0.25; }
+
+/* Aurora overlay on top of solar system */
 body::before {
     content: '';
     position: fixed;
     inset: 0;
     background:
-        radial-gradient(ellipse 80% 60% at 20% 40%, rgba(100,200,255,0.1) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 80% at 80% 20%, rgba(180,120,255,0.1) 0%, transparent 60%),
-        radial-gradient(ellipse 70% 50% at 50% 90%, rgba(100,255,200,0.07) 0%, transparent 60%);
+        radial-gradient(ellipse 80% 60% at 20% 40%, rgba(100,200,255,0.07) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 80% at 80% 20%, rgba(180,120,255,0.07) 0%, transparent 60%);
     animation: aurora 10s ease-in-out infinite alternate;
     pointer-events: none;
-    z-index: 0;
+    z-index: 1;
 }
-@keyframes aurora { 0% { transform: scale(1) rotate(0deg); } 100% { transform: scale(1.08) rotate(-2deg); } }
-
-.particle { position: fixed; border-radius: 50%; pointer-events: none; animation: float linear infinite; z-index: 0; }
-@keyframes float {
-    0%   { transform: translateY(110vh) scale(0); opacity: 0; }
-    10%  { opacity: 0.5; }
-    90%  { opacity: 0.3; }
-    100% { transform: translateY(-10vh) scale(1.2); opacity: 0; }
-}
+@keyframes aurora { 0% { transform: scale(1); } 100% { transform: scale(1.08) rotate(-2deg); } }
 
 /* TOP NAV */
 .topnav {
@@ -717,7 +769,6 @@ body::before {
     position: relative;
 }
 
-/* PROFILE AVATAR */
 .profile-btn {
     width: 38px; height: 38px;
     border-radius: 50%;
@@ -735,7 +786,6 @@ body::before {
 }
 .profile-btn:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(92,200,245,0.4); }
 
-/* PROFILE DROPDOWN */
 .profile-dropdown {
     display: none;
     position: absolute;
@@ -751,11 +801,7 @@ body::before {
     animation: dropDown 0.25s cubic-bezier(0.16,1,0.3,1) both;
     z-index: 200;
 }
-body.light-mode .profile-dropdown {
-    background: rgba(255,255,255,0.98);
-    border-color: rgba(100,150,255,0.2);
-}
-
+body.light-mode .profile-dropdown { background: rgba(255,255,255,0.98); border-color: rgba(100,150,255,0.2); }
 .profile-dropdown.open { display: block; }
 
 @keyframes dropDown {
@@ -764,9 +810,7 @@ body.light-mode .profile-dropdown {
 }
 
 .profile-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+    display: flex; align-items: center; gap: 12px;
     padding-bottom: 14px;
     border-bottom: 1px solid rgba(255,255,255,0.08);
     margin-bottom: 12px;
@@ -774,110 +818,49 @@ body.light-mode .profile-dropdown {
 body.light-mode .profile-header { border-color: rgba(0,0,0,0.08); }
 
 .profile-avatar-lg {
-    width: 46px; height: 46px;
-    border-radius: 50%;
+    width: 46px; height: 46px; border-radius: 50%;
     background: linear-gradient(135deg, #5bc8f5, #a78bfa);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.3rem;
-    font-weight: 900;
-    color: #fff;
-    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem; font-weight: 900; color: #fff; flex-shrink: 0;
 }
 
-.profile-info-name {
-    font-weight: 800;
-    color: var(--text);
-    font-size: 0.95rem;
-}
-.profile-info-sub {
-    color: var(--text-muted);
-    font-size: 0.75rem;
-}
+.profile-info-name { font-weight: 800; color: var(--text); font-size: 0.95rem; }
+.profile-info-sub { color: var(--text-muted); font-size: 0.75rem; }
 
 .dropdown-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-radius: 10px;
-    color: var(--text-muted);
-    text-decoration: none;
-    font-size: 0.88rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s;
-    border: none;
-    background: none;
-    width: 100%;
-    text-align: left;
-    font-family: 'Nunito', sans-serif;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 10px;
+    color: var(--text-muted); text-decoration: none;
+    font-size: 0.88rem; font-weight: 700; cursor: pointer;
+    transition: all 0.2s; border: none; background: none;
+    width: 100%; text-align: left; font-family: 'Nunito', sans-serif;
 }
 .dropdown-item:hover { background: rgba(255,255,255,0.06); color: var(--text); }
 body.light-mode .dropdown-item:hover { background: rgba(0,0,0,0.05); }
-
 .dropdown-item.danger { color: rgba(255,120,120,0.8); }
 .dropdown-item.danger:hover { background: rgba(255,80,80,0.1); color: #ff6b6b; }
 
-.dropdown-divider {
-    height: 1px;
-    background: rgba(255,255,255,0.07);
-    margin: 8px 0;
-}
+.dropdown-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 8px 0; }
 body.light-mode .dropdown-divider { background: rgba(0,0,0,0.08); }
 
-/* DARK/LIGHT TOGGLE */
 .theme-toggle-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    border-radius: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-radius: 10px;
 }
+.theme-label { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 0.88rem; font-weight: 700; }
 
-.theme-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-muted);
-    font-size: 0.88rem;
-    font-weight: 700;
-}
-
-/* iOS-style toggle switch */
-.toggle-switch {
-    position: relative;
-    width: 44px;
-    height: 26px;
-    cursor: pointer;
-}
+.toggle-switch { position: relative; width: 44px; height: 26px; cursor: pointer; }
 .toggle-switch input { display: none; }
-.toggle-track {
-    width: 44px;
-    height: 26px;
-    border-radius: 13px;
-    background: rgba(255,255,255,0.15);
-    transition: background 0.3s;
-    position: relative;
-}
+.toggle-track { width: 44px; height: 26px; border-radius: 13px; background: rgba(255,255,255,0.15); transition: background 0.3s; position: relative; }
 body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
 .toggle-switch input:checked + .toggle-track { background: linear-gradient(135deg, #5bc8f5, #a78bfa); }
-.toggle-thumb {
-    position: absolute;
-    top: 3px; left: 3px;
-    width: 20px; height: 20px;
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
-}
+.toggle-thumb { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
 .toggle-switch input:checked + .toggle-track .toggle-thumb { transform: translateX(18px); }
 
 /* CONTENT */
 .page-content {
     position: relative;
-    z-index: 1;
+    z-index: 2;
     width: 100%;
     max-width: 560px;
 }
@@ -897,7 +880,6 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
 }
 @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 
-/* FEATURE CARDS GRID */
 .feature-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -922,65 +904,33 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
     overflow: hidden;
 }
 .feature-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    transition: opacity 0.3s;
-    border-radius: 20px;
+    content: ''; position: absolute; inset: 0;
+    opacity: 0; transition: opacity 0.3s; border-radius: 20px;
 }
 .feature-card:hover { transform: translateY(-4px); box-shadow: 0 12px 36px rgba(0,0,0,0.3); }
 .feature-card:hover::before { opacity: 1; }
-
 .feature-card.test::before { background: radial-gradient(ellipse at top left, rgba(91,200,245,0.12), transparent 70%); }
 .feature-card.score::before { background: radial-gradient(ellipse at top left, rgba(167,139,250,0.12), transparent 70%); }
 .feature-card.therapy::before { background: radial-gradient(ellipse at top left, rgba(110,231,183,0.12), transparent 70%); }
 .feature-card.games::before { background: radial-gradient(ellipse at top left, rgba(253,230,138,0.12), transparent 70%); }
 
-.card-icon {
-    font-size: 2rem;
-    line-height: 1;
-}
-.card-title {
-    font-size: 0.95rem;
-    font-weight: 800;
-    color: var(--text);
-    line-height: 1.3;
-}
-.card-desc {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    line-height: 1.4;
-}
+.card-icon { font-size: 2rem; line-height: 1; }
+.card-title { font-size: 0.95rem; font-weight: 800; color: var(--text); line-height: 1.3; }
+.card-desc { font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
 
-/* SCORE BADGE */
 .score-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border-radius: 99px;
-    font-size: 0.78rem;
-    font-weight: 800;
-    margin-top: 6px;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 99px;
+    font-size: 0.78rem; font-weight: 800; margin-top: 6px;
 }
 
-/* ARROW */
-.card-arrow {
-    position: absolute;
-    top: 16px; right: 16px;
-    color: var(--text-muted);
-    font-size: 0.9rem;
-    opacity: 0.5;
-}
-
-/* FULL WIDTH CARD */
-.feature-card.full {
-    grid-column: 1 / -1;
-}
+.card-arrow { position: absolute; top: 16px; right: 16px; color: var(--text-muted); font-size: 0.9rem; opacity: 0.5; }
 </style>
 </head>
 <body>
+
+<!-- SOLAR SYSTEM CANVAS -->
+<canvas id="solar-canvas"></canvas>
 
 <!-- TOP NAV -->
 <nav class="topnav">
@@ -989,8 +939,6 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
         <div class="profile-btn" id="profileBtn" onclick="toggleDropdown()">
             {{ session['user'][0].upper() }}
         </div>
-
-        <!-- PROFILE DROPDOWN -->
         <div class="profile-dropdown" id="profileDropdown">
             <div class="profile-header">
                 <div class="profile-avatar-lg">{{ session['user'][0].upper() }}</div>
@@ -999,26 +947,18 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
                     <div class="profile-info-sub">Wellness member</div>
                 </div>
             </div>
-
-            <!-- Dark / Light mode toggle -->
             <div class="theme-toggle-row">
                 <span class="theme-label">🌙 Dark Mode</span>
                 <label class="toggle-switch">
                     <input type="checkbox" id="themeToggle" onchange="toggleTheme(this)">
-                    <div class="toggle-track">
-                        <div class="toggle-thumb"></div>
-                    </div>
+                    <div class="toggle-track"><div class="toggle-thumb"></div></div>
                 </label>
             </div>
-
             <div class="dropdown-divider"></div>
-
             <a href="/profile" class="dropdown-item">👤 View Profile</a>
             <a href="/settings" class="dropdown-item">⚙️ Settings</a>
             <a href="/history" class="dropdown-item">📈 History</a>
-
             <div class="dropdown-divider"></div>
-
             <a href="/logout" class="dropdown-item danger">👋 Log Out</a>
         </div>
     </div>
@@ -1030,7 +970,6 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
     <p class="greeting-sub">How are you feeling today? Let's check in.</p>
 
     <div class="feature-grid">
-        <!-- Take Test -->
         <a href="/test" class="feature-card test">
             <span class="card-arrow">↗</span>
             <div class="card-icon">🧠</div>
@@ -1039,8 +978,6 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
                 <div class="card-desc">Mental wellness check-in</div>
             </div>
         </a>
-
-        <!-- Previous Score -->
         <a href="/history" class="feature-card score">
             <span class="card-arrow">↗</span>
             <div class="card-icon">📊</div>
@@ -1048,16 +985,12 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
                 <div class="card-title">Your Score</div>
                 {% if last_score is not none %}
                 <div class="card-desc">Last: {{ last_status }}</div>
-                <div class="score-badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;">
-                    {{ last_score }} pts
-                </div>
+                <div class="score-badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;">{{ last_score }} pts</div>
                 {% else %}
                 <div class="card-desc">No tests yet</div>
                 {% endif %}
             </div>
         </a>
-
-        <!-- Sound Therapy -->
         <a href="{{ binaural }}" target="_blank" class="feature-card therapy">
             <span class="card-arrow">↗</span>
             <div class="card-icon">🎧</div>
@@ -1066,8 +999,6 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
                 <div class="card-desc">Binaural beats for calm</div>
             </div>
         </a>
-
-        <!-- Games -->
         <a href="/games" class="feature-card games">
             <span class="card-arrow">↗</span>
             <div class="card-icon">🎮</div>
@@ -1080,7 +1011,272 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
 </div>
 
 <script>
-// Dropdown toggle
+// ===== SOLAR SYSTEM ANIMATION =====
+(function() {
+    const canvas = document.getElementById('solar-canvas');
+    const ctx = canvas.getContext('2d');
+    let W, H, cx, cy, scale;
+
+    function resize() {
+        W = canvas.width  = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+        cx = W / 2;
+        cy = H / 2;
+        scale = Math.min(W, H) / 900;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Sun + planets config
+    const SUN_R = 28;
+
+    const planets = [
+        { name:'Mercury', r:5,  orbitR:80,  speed:4.1,   color:'#b5b5b5', glow:'rgba(181,181,181,0.4)', angle:0,    moons:[] },
+        { name:'Venus',   r:9,  orbitR:130, speed:1.6,   color:'#e8cda0', glow:'rgba(232,205,160,0.4)', angle:1.2,  moons:[] },
+        { name:'Earth',   r:10, orbitR:185, speed:1.0,   color:'#4f9fff', glow:'rgba(79,159,255,0.45)', angle:2.5,
+          moons:[{ r:3, orbitR:20, speed:13, color:'#ccc', angle:0 }] },
+        { name:'Mars',    r:7,  orbitR:245, speed:0.53,  color:'#c1440e', glow:'rgba(193,68,14,0.4)',   angle:0.8,
+          moons:[{ r:2, orbitR:15, speed:22, color:'#aaa', angle:1 }] },
+        { name:'Jupiter', r:22, orbitR:330, speed:0.084, color:'#c88b3a', glow:'rgba(200,139,58,0.35)', angle:3.5,
+          bands: ['#c88b3a','#e0a96d','#a0682a','#d4a06a'],
+          moons:[
+            { r:3, orbitR:32, speed:8.9,  color:'#f0c040', angle:0 },
+            { r:2, orbitR:42, speed:4.5,  color:'#c0b0a0', angle:2 },
+          ]
+        },
+        { name:'Saturn',  r:18, orbitR:420, speed:0.034, color:'#e4d191', glow:'rgba(228,209,145,0.35)', angle:1.0,
+          rings: true,
+          moons:[{ r:3, orbitR:36, speed:5.3, color:'#e0d8c0', angle:1.5 }]
+        },
+        { name:'Uranus',  r:13, orbitR:500, speed:0.012, color:'#7de8e8', glow:'rgba(125,232,232,0.35)', angle:4.2, moons:[] },
+        { name:'Neptune', r:12, orbitR:570, speed:0.006, color:'#4b70dd', glow:'rgba(75,112,221,0.35)',  angle:5.1, moons:[] },
+    ];
+
+    // Star field
+    const stars = Array.from({length:180}, () => ({
+        x: Math.random(),
+        y: Math.random(),
+        r: Math.random() * 1.4 + 0.2,
+        opacity: Math.random() * 0.7 + 0.2,
+        twinkle: Math.random() * Math.PI * 2,
+        twinkleSpeed: (Math.random() * 0.02 + 0.005)
+    }));
+
+    // Asteroid belt particles
+    const asteroids = Array.from({length:60}, () => ({
+        angle: Math.random() * Math.PI * 2,
+        orbitR: 278 + (Math.random() - 0.5) * 24,
+        speed: 0.18 + Math.random() * 0.12,
+        r: Math.random() * 1.5 + 0.3,
+        opacity: Math.random() * 0.5 + 0.2
+    }));
+
+    let t = 0;
+
+    function drawSun(cx, cy, sc) {
+        // Outer glow rings
+        [80,55,35].forEach((gr, i) => {
+            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, gr * sc);
+            grad.addColorStop(0, `rgba(255,200,80,${0.06 - i*0.015})`);
+            grad.addColorStop(1, 'rgba(255,200,80,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(cx, cy, gr * sc, 0, Math.PI*2);
+            ctx.fill();
+        });
+
+        // Corona flare animation
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(t * 0.001);
+        for (let i = 0; i < 8; i++) {
+            ctx.save();
+            ctx.rotate((i / 8) * Math.PI * 2);
+            const fGrad = ctx.createLinearGradient(0, 0, 0, -SUN_R * sc * 2.2);
+            fGrad.addColorStop(0, 'rgba(255,220,80,0.18)');
+            fGrad.addColorStop(1, 'rgba(255,140,0,0)');
+            ctx.fillStyle = fGrad;
+            ctx.beginPath();
+            ctx.moveTo(-3 * sc, 0);
+            ctx.quadraticCurveTo(0, -SUN_R * sc * 1.5, 3 * sc, 0);
+            ctx.fill();
+            ctx.restore();
+        }
+        ctx.restore();
+
+        // Main sun body
+        const sunGrad = ctx.createRadialGradient(
+            cx - SUN_R*sc*0.3, cy - SUN_R*sc*0.3, 0,
+            cx, cy, SUN_R * sc
+        );
+        sunGrad.addColorStop(0,   '#fff7a0');
+        sunGrad.addColorStop(0.3, '#ffe066');
+        sunGrad.addColorStop(0.7, '#ff9900');
+        sunGrad.addColorStop(1,   '#ff6600');
+        ctx.fillStyle = sunGrad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, SUN_R * sc, 0, Math.PI*2);
+        ctx.fill();
+    }
+
+    function drawOrbit(cx, cy, r, sc) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * sc, 0, Math.PI*2);
+        ctx.stroke();
+    }
+
+    function drawPlanet(p, sc) {
+        const angle = p.angle + t * p.speed * 0.0008;
+        const px = cx + Math.cos(angle) * p.orbitR * sc;
+        const py = cy + Math.sin(angle) * p.orbitR * sc;
+        const pr = p.r * sc;
+
+        // Glow
+        if (p.glow) {
+            const gGrad = ctx.createRadialGradient(px, py, 0, px, py, pr * 3);
+            gGrad.addColorStop(0, p.glow);
+            gGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = gGrad;
+            ctx.beginPath();
+            ctx.arc(px, py, pr * 3, 0, Math.PI*2);
+            ctx.fill();
+        }
+
+        // Saturn rings (behind planet)
+        if (p.rings) {
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.scale(1, 0.3);
+            const ringGrad = ctx.createRadialGradient(0, 0, pr * 1.3, 0, 0, pr * 2.6);
+            ringGrad.addColorStop(0,   'rgba(228,209,145,0.55)');
+            ringGrad.addColorStop(0.5, 'rgba(200,180,120,0.35)');
+            ringGrad.addColorStop(1,   'rgba(180,160,100,0)');
+            ctx.fillStyle = ringGrad;
+            ctx.beginPath();
+            ctx.arc(0, 0, pr * 2.6, 0, Math.PI*2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Planet body
+        const pGrad = ctx.createRadialGradient(
+            px - pr*0.3, py - pr*0.3, 0,
+            px, py, pr
+        );
+
+        if (p.name === 'Jupiter' && p.bands) {
+            pGrad.addColorStop(0,   '#e8b870');
+            pGrad.addColorStop(0.5, '#c88b3a');
+            pGrad.addColorStop(1,   '#8a5a20');
+        } else if (p.name === 'Earth') {
+            pGrad.addColorStop(0,   '#7dc8ff');
+            pGrad.addColorStop(0.4, '#4f9fff');
+            pGrad.addColorStop(0.8, '#2a5fc0');
+            pGrad.addColorStop(1,   '#1a3a80');
+        } else {
+            pGrad.addColorStop(0, lighten(p.color, 50));
+            pGrad.addColorStop(0.6, p.color);
+            pGrad.addColorStop(1, darken(p.color, 50));
+        }
+
+        ctx.fillStyle = pGrad;
+        ctx.beginPath();
+        ctx.arc(px, py, pr, 0, Math.PI*2);
+        ctx.fill();
+
+        // Jupiter bands
+        if (p.name === 'Jupiter') {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(px, py, pr, 0, Math.PI*2);
+            ctx.clip();
+            ['rgba(160,90,30,0.3)','rgba(220,170,90,0.2)','rgba(140,80,20,0.25)'].forEach((bc, i) => {
+                const by = py - pr + (pr * 2 / 4) * (i+1);
+                ctx.fillStyle = bc;
+                ctx.fillRect(px - pr, by - 2, pr*2, 4 + i*2);
+            });
+            ctx.restore();
+        }
+
+        // Moons
+        if (p.moons) {
+            p.moons.forEach(m => {
+                const ma = m.angle + t * m.speed * 0.0008;
+                const mr2 = m.orbitR * sc;
+                const mx = px + Math.cos(ma) * mr2;
+                const my = py + Math.sin(ma) * mr2;
+                ctx.fillStyle = m.color;
+                ctx.beginPath();
+                ctx.arc(mx, my, m.r * sc, 0, Math.PI*2);
+                ctx.fill();
+            });
+        }
+
+        return { x: px, y: py };
+    }
+
+    function lighten(hex, amt) {
+        const num = parseInt(hex.replace('#',''), 16);
+        const r = Math.min(255, (num >> 16) + amt);
+        const g = Math.min(255, ((num >> 8) & 0xff) + amt);
+        const b = Math.min(255, (num & 0xff) + amt);
+        return `rgb(${r},${g},${b})`;
+    }
+
+    function darken(hex, amt) {
+        const num = parseInt(hex.replace('#',''), 16);
+        const r = Math.max(0, (num >> 16) - amt);
+        const g = Math.max(0, ((num >> 8) & 0xff) - amt);
+        const b = Math.max(0, (num & 0xff) - amt);
+        return `rgb(${r},${g},${b})`;
+    }
+
+    function animate() {
+        ctx.clearRect(0, 0, W, H);
+
+        // Space background
+        ctx.fillStyle = '#0a0a18';
+        ctx.fillRect(0, 0, W, H);
+
+        // Stars with twinkle
+        stars.forEach(s => {
+            s.twinkle += s.twinkleSpeed;
+            const op = s.opacity * (0.7 + 0.3 * Math.sin(s.twinkle));
+            ctx.fillStyle = `rgba(255,255,255,${op})`;
+            ctx.beginPath();
+            ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI*2);
+            ctx.fill();
+        });
+
+        const sc = scale;
+
+        // Orbit paths
+        planets.forEach(p => drawOrbit(cx, cy, p.orbitR, sc));
+
+        // Asteroid belt
+        asteroids.forEach(a => {
+            a.angle += a.speed * 0.0004;
+            const ax = cx + Math.cos(a.angle) * a.orbitR * sc;
+            const ay = cy + Math.sin(a.angle) * a.orbitR * sc;
+            ctx.fillStyle = `rgba(180,160,140,${a.opacity})`;
+            ctx.beginPath();
+            ctx.arc(ax, ay, a.r * sc, 0, Math.PI*2);
+            ctx.fill();
+        });
+
+        drawSun(cx, cy, sc);
+        planets.forEach(p => drawPlanet(p, sc));
+
+        t++;
+        requestAnimationFrame(animate);
+    }
+
+    animate();
+})();
+
+// ===== DROPDOWN & THEME =====
 function toggleDropdown() {
     document.getElementById('profileDropdown').classList.toggle('open');
 }
@@ -1091,40 +1287,19 @@ document.addEventListener('click', e => {
     }
 });
 
-// Theme toggle
 const savedTheme = localStorage.getItem('mindspace-theme');
 if (savedTheme === 'light') {
     document.body.classList.add('light-mode');
     document.getElementById('themeToggle').checked = true;
-    updateThemeLabel(true);
+} else {
+    document.getElementById('themeToggle').checked = true; // dark = checked by default
 }
 
 function toggleTheme(cb) {
-    const isLight = !cb.checked; // checked = dark (default), unchecked = light... wait
-    // checked = dark mode OFF = light; let's reconsider:
-    // We label it "Dark Mode" — toggle ON means dark mode is ON
     const isDark = cb.checked;
     document.body.classList.toggle('light-mode', !isDark);
     localStorage.setItem('mindspace-theme', isDark ? 'dark' : 'light');
-    updateThemeLabel(isDark);
 }
-
-function updateThemeLabel(isDark) {
-    // No label update needed — just switch works
-}
-
-// Particles
-function makeParticles() {
-    const colors = ['#7ec8f7','#a78bfa','#6ee7b7','#fde68a','#f9a8d4'];
-    for (let p = 0; p < 18; p++) {
-        const el = document.createElement('div');
-        el.className = 'particle';
-        const size = Math.random() * 6 + 2;
-        el.style.cssText = `width:${size}px;height:${size}px;left:${Math.random()*100}vw;background:${colors[Math.floor(Math.random()*colors.length)]};animation-duration:${Math.random()*12+8}s;animation-delay:${Math.random()*-15}s;opacity:${Math.random()*0.4+0.1}`;
-        document.body.appendChild(el);
-    }
-}
-makeParticles();
 </script>
 </body>
 </html>
@@ -1147,74 +1322,27 @@ def test():
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-    font-family: 'Nunito', sans-serif;
-    min-height: 100vh;
-    background: #0d0d1a;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 24px 16px 100px;
-    position: relative;
-    overflow-x: hidden;
-}
-
-body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background:
-        radial-gradient(ellipse 80% 60% at 20% 40%, rgba(100,200,255,0.1) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 80% at 80% 20%, rgba(180,120,255,0.1) 0%, transparent 60%);
-    animation: aurora 10s ease-in-out infinite alternate;
-    pointer-events: none;
-}
+body { font-family: 'Nunito', sans-serif; min-height: 100vh; background: #0d0d1a; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px 100px; position: relative; overflow-x: hidden; }
+body::before { content: ''; position: fixed; inset: 0; background: radial-gradient(ellipse 80% 60% at 20% 40%, rgba(100,200,255,0.1) 0%, transparent 60%), radial-gradient(ellipse 60% 80% at 80% 20%, rgba(180,120,255,0.1) 0%, transparent 60%); animation: aurora 10s ease-in-out infinite alternate; pointer-events: none; }
 @keyframes aurora { 0% { transform: scale(1); } 100% { transform: scale(1.08) rotate(-2deg); } }
-
 .particle { position: fixed; border-radius: 50%; pointer-events: none; animation: float linear infinite; z-index: 0; }
 @keyframes float { 0% { transform: translateY(110vh) scale(0); opacity: 0; } 10% { opacity: 0.5; } 90% { opacity: 0.3; } 100% { transform: translateY(-10vh) scale(1.2); opacity: 0; } }
-
-.topnav {
-    position: fixed; top: 0; left: 0; right: 0;
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 14px 24px;
-    background: rgba(13,13,26,0.8);
-    backdrop-filter: blur(16px);
-    border-bottom: 1px solid rgba(255,255,255,0.07);
-    z-index: 100;
-}
+.topnav { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 14px 24px; background: rgba(13,13,26,0.8); backdrop-filter: blur(16px); border-bottom: 1px solid rgba(255,255,255,0.07); z-index: 100; }
 .brand { font-family: 'Playfair Display', serif; font-size: 1.2rem; color: #fff; }
 .nav-links a { color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.82rem; font-weight: 700; margin-left: 16px; padding: 6px 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s; }
 .nav-links a:hover { color: #fff; background: rgba(255,255,255,0.08); }
-
-.main-card {
-    position: relative; z-index: 1;
-    background: rgba(255,255,255,0.04);
-    backdrop-filter: blur(24px);
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 28px;
-    padding: 40px 36px;
-    width: 100%; max-width: 520px;
-    box-shadow: 0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
-    margin-top: 60px;
-    animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) both;
-}
+.main-card { position: relative; z-index: 1; background: rgba(255,255,255,0.04); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.09); border-radius: 28px; padding: 40px 36px; width: 100%; max-width: 520px; box-shadow: 0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08); margin-top: 60px; animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) both; }
 @keyframes slideUp { from { opacity:0; transform:translateY(40px) scale(0.96); } to { opacity:1; transform:translateY(0) scale(1); } }
-
 .progress-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
 .progress-bar { flex: 1; height: 6px; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, #5bc8f5, #a78bfa); border-radius: 99px; transition: width 0.5s cubic-bezier(0.16,1,0.3,1); box-shadow: 0 0 10px rgba(167,139,250,0.6); }
 .progress-label { color: rgba(255,255,255,0.4); font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
-
 .question-wrap { min-height: 56px; margin-bottom: 28px; }
 .question-text { font-size: 1.15rem; font-weight: 800; color: #fff; line-height: 1.5; animation: fadeInQ 0.4s cubic-bezier(0.16,1,0.3,1) both; }
 @keyframes fadeInQ { from { opacity:0; transform:translateX(30px); } to { opacity:1; transform:translateX(0); } }
-
 .options { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
 .option-label { display: flex; align-items: center; gap: 14px; padding: 13px 18px; background: rgba(255,255,255,0.04); border: 1.5px solid rgba(255,255,255,0.08); border-radius: 14px; cursor: pointer; transition: all 0.25s; animation: fadeInOpt 0.4s cubic-bezier(0.16,1,0.3,1) both; }
-.option-label:nth-child(1) { animation-delay: 0.05s; } .option-label:nth-child(2) { animation-delay: 0.10s; } .option-label:nth-child(3) { animation-delay: 0.15s; } .option-label:nth-child(4) { animation-delay: 0.20s; } .option-label:nth-child(5) { animation-delay: 0.25s; }
+.option-label:nth-child(1){animation-delay:0.05s;}.option-label:nth-child(2){animation-delay:0.10s;}.option-label:nth-child(3){animation-delay:0.15s;}.option-label:nth-child(4){animation-delay:0.20s;}.option-label:nth-child(5){animation-delay:0.25s;}
 @keyframes fadeInOpt { from { opacity:0; transform:translateX(-20px); } to { opacity:1; transform:translateX(0); } }
 .option-label:hover { background: rgba(92,200,245,0.08); border-color: rgba(92,200,245,0.35); transform: translateX(4px); }
 .option-label input[type="radio"] { display: none; }
@@ -1225,11 +1353,9 @@ body::before {
 .option-label.selected .option-dot::after { opacity: 1; transform: scale(1); }
 .option-text { color: rgba(255,255,255,0.75); font-size: 0.9rem; font-weight: 600; }
 .option-val { margin-left: auto; font-size: 1.1rem; }
-
 .btn-next { width: 100%; padding: 15px; border: none; border-radius: 14px; font-size: 1rem; font-weight: 800; font-family: 'Nunito', sans-serif; cursor: pointer; background: linear-gradient(135deg, #5bc8f5, #a78bfa); color: #fff; transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s; position: relative; overflow: hidden; }
 .btn-next:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(92,200,245,0.3); }
 .btn-next:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-
 .result-wrap { display: none; animation: fadeInResult 0.6s cubic-bezier(0.16,1,0.3,1) both; }
 @keyframes fadeInResult { from { opacity:0; transform:scale(0.9); } to { opacity:1; transform:scale(1); } }
 .result-badge { text-align: center; padding: 24px; border-radius: 20px; margin-bottom: 20px; border: 1.5px solid rgba(255,255,255,0.1); }
@@ -1239,19 +1365,16 @@ body::before {
 .remedy-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: rgba(255,255,255,0.04); border-radius: 10px; color: rgba(255,255,255,0.8); font-size: 0.88rem; font-weight: 600; }
 .btn-retake { width: 100%; padding: 13px; margin-top: 16px; border: 1.5px solid rgba(255,255,255,0.15); border-radius: 14px; background: transparent; color: rgba(255,255,255,0.7); font-family: 'Nunito', sans-serif; font-weight: 700; cursor: pointer; transition: all 0.2s; font-size: 0.9rem; }
 .btn-retake:hover { background: rgba(255,255,255,0.06); color: #fff; }
-
 .yt-float { position: fixed; bottom: 28px; right: 28px; z-index: 200; display: none; }
 .yt-float a { display: flex; align-items: center; gap: 10px; background: linear-gradient(135deg, #5bc8f5, #a78bfa); color: #fff; text-decoration: none; padding: 12px 20px 12px 14px; border-radius: 99px; font-weight: 800; font-size: 0.85rem; box-shadow: 0 8px 28px rgba(92,200,245,0.35); transition: transform 0.3s, box-shadow 0.3s; animation: pulse-glow 2.5s ease-in-out infinite; }
 .yt-float a:hover { transform: translateY(-3px) scale(1.04); }
-@keyframes pulse-glow { 0%, 100% { box-shadow: 0 8px 28px rgba(92,200,245,0.35); } 50% { box-shadow: 0 8px 40px rgba(167,139,250,0.55); } }
+@keyframes pulse-glow { 0%,100% { box-shadow: 0 8px 28px rgba(92,200,245,0.35); } 50% { box-shadow: 0 8px 40px rgba(167,139,250,0.55); } }
 .yt-icon { width: 32px; height: 32px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .yt-icon svg { width: 16px; height: 16px; fill: #fff; }
-
 .alert-toast { position: fixed; top: 80px; right: 24px; background: rgba(255,100,100,0.15); border: 1px solid rgba(255,100,100,0.3); color: #ffaaaa; padding: 12px 18px; border-radius: 12px; font-size: 0.85rem; font-weight: 700; z-index: 300; display: none; }
 </style>
 </head>
 <body>
-
 <nav class="topnav">
     <span class="brand">MindSpace 🌿</span>
     <div class="nav-links">
@@ -1260,9 +1383,7 @@ body::before {
         <a href="/logout">👋 Logout</a>
     </div>
 </nav>
-
 <div class="alert-toast" id="toast">👆 Please select an option!</div>
-
 <div class="main-card" id="mainCard">
     <div class="progress-wrap">
         <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
@@ -1281,20 +1402,17 @@ body::before {
         <a href="/" style="display:block;text-align:center;margin-top:10px;color:rgba(255,255,255,0.4);font-size:0.85rem;text-decoration:none;font-weight:700;">← Back to Home</a>
     </div>
 </div>
-
 <div class="yt-float" id="ytFloat">
     <a href="{{ binaural }}" target="_blank" rel="noopener">
         <div class="yt-icon"><svg viewBox="0 0 24 24"><path d="M21.8 8s-.2-1.4-.8-2c-.8-.8-1.6-.8-2-.9C16.4 5 12 5 12 5s-4.4 0-7 .1c-.4.1-1.2.1-2 .9C2.4 6.6 2.2 8 2.2 8S2 9.6 2 11.2v1.5C2 14.3 2.2 16 2.2 16s.2 1.4.8 2c.8.8 1.8.8 2.2.9C6.6 19 12 19 12 19s4.4 0 7-.1c.4-.1 1.2-.1 2-.9.6-.6.8-2 .8-2S22 14.3 22 12.7v-1.5C22 9.6 21.8 8 21.8 8zM9.7 14.5V9l5.3 2.8-5.3 2.7z"/></svg></div>
         🎧 Relax Now
     </a>
 </div>
-
 <script>
 const q = {{ questions|tojson }};
 const labels = ['Never', 'Rarely', 'Sometimes', 'Often', 'Always'];
 const emoji  = ['😌','🙂','😐','😟','😣'];
 let i = 0, ans = {};
-
 function load() {
     const pct = (i / q.length) * 100;
     document.getElementById('progressFill').style.width = pct + '%';
@@ -1308,12 +1426,15 @@ function load() {
         const lbl = document.createElement('label');
         lbl.className = 'option-label';
         lbl.innerHTML = `<input type="radio" name="a" value="${j}"><div class="option-dot"></div><span class="option-text">${labels[j-1]}</span><span class="option-val">${emoji[j-1]}</span>`;
-        lbl.addEventListener('click', () => { document.querySelectorAll('.option-label').forEach(l => l.classList.remove('selected')); lbl.classList.add('selected'); lbl.querySelector('input').checked = true; });
+        lbl.addEventListener('click', () => {
+            document.querySelectorAll('.option-label').forEach(l => l.classList.remove('selected'));
+            lbl.classList.add('selected');
+            lbl.querySelector('input').checked = true;
+        });
         opt.appendChild(lbl);
     }
 }
 load();
-
 function next() {
     const v = document.querySelector('input[name=a]:checked');
     if (!v) { const t=document.getElementById('toast'); t.style.display='block'; setTimeout(()=>t.style.display='none',2200); return; }
@@ -1341,7 +1462,6 @@ function next() {
         });
     }
 }
-
 function retake() {
     i=0; ans={};
     document.getElementById('questionText').style.display=''; document.getElementById('options').style.display='';
@@ -1350,11 +1470,7 @@ function retake() {
     document.getElementById('ytFloat').style.display='none';
     load();
 }
-
-function makeParticles() {
-    const colors=['#7ec8f7','#a78bfa','#6ee7b7','#fde68a','#f9a8d4'];
-    for(let p=0;p<18;p++){const el=document.createElement('div');el.className='particle';const size=Math.random()*6+2;el.style.cssText=`width:${size}px;height:${size}px;left:${Math.random()*100}vw;background:${colors[Math.floor(Math.random()*colors.length)]};animation-duration:${Math.random()*12+8}s;animation-delay:${Math.random()*-15}s;opacity:${Math.random()*0.4+0.1}`;document.body.appendChild(el);}
-}
+function makeParticles(){const colors=['#7ec8f7','#a78bfa','#6ee7b7','#fde68a','#f9a8d4'];for(let p=0;p<18;p++){const el=document.createElement('div');el.className='particle';const size=Math.random()*6+2;el.style.cssText=`width:${size}px;height:${size}px;left:${Math.random()*100}vw;background:${colors[Math.floor(Math.random()*colors.length)]};animation-duration:${Math.random()*12+8}s;animation-delay:${Math.random()*-15}s;opacity:${Math.random()*0.4+0.1}`;document.body.appendChild(el);}}
 makeParticles();
 </script>
 </body>
@@ -1368,10 +1484,15 @@ def assess():
     if "user" not in session:
         return jsonify({"error": "Not logged in"}), 401
     data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
     score = 0
     positive = ["sleep","exercise","motivation","energy"]
     for k, v in data.items():
-        score += (6-v if k in positive else v)
+        if k in positive:
+            score += (6 - v)
+        else:
+            score += v
     max_score = len(data) * 5
     if score <= max_score * 0.25:   status, color = "Stable 🟢", "#0a0"
     elif score <= max_score * 0.5:  status, color = "Mild 🟡", "#e6b800"
@@ -1391,7 +1512,6 @@ def assess():
 def games():
     if "user" not in session:
         return redirect("/login")
-
     return render_template_string("""
 <!DOCTYPE html>
 <html>
@@ -1415,23 +1535,16 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .page-title{font-family:'Playfair Display',serif;font-size:1.8rem;margin-bottom:4px;animation:slideUp 0.6s cubic-bezier(0.16,1,0.3,1) both;}
 .page-sub{color:rgba(255,255,255,0.4);font-size:0.85rem;margin-bottom:28px;}
 @keyframes slideUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
-
 .game-tabs{display:flex;gap:10px;margin-bottom:24px;background:rgba(255,255,255,0.04);padding:6px;border-radius:16px;border:1px solid rgba(255,255,255,0.08);}
 .tab-btn{flex:1;padding:10px;border:none;border-radius:12px;font-family:'Nunito',sans-serif;font-weight:800;font-size:0.9rem;cursor:pointer;transition:all 0.25s;background:transparent;color:rgba(255,255,255,0.4);}
 .tab-btn.active{background:linear-gradient(135deg,#5bc8f5,#a78bfa);color:#fff;box-shadow:0 4px 16px rgba(92,200,245,0.3);}
-
-.game-panel{display:none;}
-.game-panel.active{display:block;}
-
-/* SUDOKU */
+.game-panel{display:none;}.game-panel.active{display:block;}
 .sudoku-grid{display:grid;grid-template-columns:repeat(9,1fr);gap:2px;background:rgba(92,200,245,0.3);border-radius:12px;overflow:hidden;padding:2px;max-width:360px;margin:0 auto 20px;}
 .sudoku-cell{background:rgba(13,13,26,0.9);aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:800;cursor:pointer;transition:background 0.2s;border:none;color:#fff;font-family:'Nunito',sans-serif;}
 .sudoku-cell:hover{background:rgba(92,200,245,0.12);}
 .sudoku-cell.given{color:#5bc8f5;cursor:default;}
 .sudoku-cell.selected{background:rgba(92,200,245,0.2)!important;}
 .sudoku-cell.error{color:#ff6b6b!important;}
-.sudoku-cell:nth-child(3n){border-right:2px solid rgba(92,200,245,0.5);}
-.sudoku-row-break{border-bottom:2px solid rgba(92,200,245,0.5);}
 .sudoku-numpad{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:16px;}
 .num-btn{width:44px;height:44px;border:1.5px solid rgba(255,255,255,0.12);border-radius:10px;background:rgba(255,255,255,0.05);color:#fff;font-size:1.1rem;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif;transition:all 0.2s;}
 .num-btn:hover{background:rgba(92,200,245,0.15);border-color:#5bc8f5;}
@@ -1441,8 +1554,6 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .game-btn.secondary{background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);}
 .game-btn:hover{transform:translateY(-2px);}
 .sudoku-status{text-align:center;color:rgba(255,255,255,0.5);font-size:0.85rem;margin-bottom:12px;}
-
-/* CHESS */
 .chess-wrap{max-width:400px;margin:0 auto;}
 .chess-info{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:10px 16px;background:rgba(255,255,255,0.04);border-radius:12px;border:1px solid rgba(255,255,255,0.08);}
 .chess-turn{font-weight:800;font-size:0.9rem;color:#fff;}
@@ -1460,22 +1571,15 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 <body>
 <nav class="topnav">
     <span class="brand">MindSpace 🌿</span>
-    <div class="nav-links">
-        <a href="/">🏠 Home</a>
-        <a href="/logout">👋 Logout</a>
-    </div>
+    <div class="nav-links"><a href="/">🏠 Home</a><a href="/logout">👋 Logout</a></div>
 </nav>
-
 <div class="page-wrap">
     <h1 class="page-title">🎮 Mind Games</h1>
     <p class="page-sub">Sharpen your mind with these relaxing games</p>
-
     <div class="game-tabs">
         <button class="tab-btn active" onclick="switchTab('sudoku',this)">🔢 Sudoku</button>
         <button class="tab-btn" onclick="switchTab('chess',this)">♟️ Chess</button>
     </div>
-
-    <!-- SUDOKU -->
     <div class="game-panel active" id="panel-sudoku">
         <div class="sudoku-status" id="sudokuStatus">Select a cell, then enter a number</div>
         <div class="sudoku-grid" id="sudokuGrid"></div>
@@ -1486,8 +1590,6 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
             <button class="game-btn secondary" onclick="checkSudoku()">✅ Check</button>
         </div>
     </div>
-
-    <!-- CHESS -->
     <div class="game-panel" id="panel-chess">
         <div class="chess-wrap">
             <div class="chess-info">
@@ -1500,246 +1602,38 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
         </div>
     </div>
 </div>
-
 <script>
-// TAB SWITCHING
 function switchTab(tab, btn) {
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
     document.querySelectorAll('.game-panel').forEach(p=>p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-'+tab).classList.add('active');
 }
-
-// ============ SUDOKU ============
 const PUZZLES = [
     [5,3,0,0,7,0,0,0,0,6,0,0,1,9,5,0,0,0,0,9,8,0,0,0,0,6,0,8,0,0,0,6,0,0,0,3,4,0,0,8,0,3,0,0,1,7,0,0,0,2,0,0,0,6,0,6,0,0,0,0,2,8,0,0,0,0,4,1,9,0,0,5,0,0,0,0,8,0,0,7,9],
     [0,0,0,2,6,0,7,0,1,6,8,0,0,7,0,0,9,0,1,9,0,0,0,4,5,0,0,8,2,0,1,0,0,0,4,0,0,0,4,6,0,2,9,0,0,0,5,0,0,0,3,0,2,8,0,0,9,3,0,0,0,7,4,0,4,0,0,5,0,0,3,6,7,0,3,0,1,8,0,0,0]
 ];
-
-let sudokuPuzzle = [], sudokuSolution = [], selectedCell = -1;
-
-function solveSudoku(board) {
-    const b = [...board];
-    function solve() {
-        const empty = b.indexOf(0);
-        if (empty === -1) return true;
-        const row = Math.floor(empty/9), col = empty%9;
-        for (let n=1;n<=9;n++) {
-            if (isValid(b,row,col,n)) {
-                b[empty]=n;
-                if(solve()) return true;
-                b[empty]=0;
-            }
-        }
-        return false;
-    }
-    function isValid(b,r,c,n) {
-        for(let i=0;i<9;i++){if(b[r*9+i]===n||b[i*9+c]===n)return false;}
-        const br=Math.floor(r/3)*3,bc=Math.floor(c/3)*3;
-        for(let i=0;i<3;i++)for(let j=0;j<3;j++)if(b[(br+i)*9+(bc+j)]===n)return false;
-        return true;
-    }
-    solve();
-    return b;
-}
-
-function newSudokuGame() {
-    const base = PUZZLES[Math.floor(Math.random()*PUZZLES.length)];
-    sudokuPuzzle = [...base];
-    sudokuSolution = solveSudoku([...base]);
-    selectedCell = -1;
-    renderSudoku();
-    document.getElementById('sudokuStatus').textContent = 'Select a cell, then enter a number';
-    document.getElementById('sudokuStatus').style.color = 'rgba(255,255,255,0.5)';
-}
-
-function renderSudoku() {
-    const grid = document.getElementById('sudokuGrid');
-    grid.innerHTML = '';
-    for (let i=0;i<81;i++) {
-        const cell = document.createElement('button');
-        cell.className = 'sudoku-cell' + (sudokuPuzzle[i]!==0 || i===selectedCell?' ':' ');
-        const orig = PUZZLES.find(p=>p[i]!==0);
-        // Check if this was an original given
-        const isGiven = [0,1].some(pi=>PUZZLES[pi][i]!==0 && PUZZLES[pi][i]===sudokuPuzzle[i] && sudokuPuzzle[i]!==0) || (sudokuPuzzle[i]!==0 && checkIfOriginal(i));
-        if (checkIfOriginal(i)) cell.classList.add('given');
-        if (i===selectedCell) cell.classList.add('selected');
-        cell.textContent = sudokuPuzzle[i] || '';
-        cell.onclick = () => selectCell(i);
-        grid.appendChild(cell);
-    }
-    // Build numpad
-    const np = document.getElementById('numpad');
-    np.innerHTML = '';
-    for(let n=1;n<=9;n++){const b=document.createElement('button');b.className='num-btn';b.textContent=n;b.onclick=()=>enterNum(n);np.appendChild(b);}
-}
-
-function checkIfOriginal(idx) {
-    return PUZZLES[0][idx]!==0 || PUZZLES[1][idx]!==0;
-}
-
-function selectCell(idx) {
-    if (checkIfOriginal(idx)) return;
-    selectedCell = idx;
-    renderSudoku();
-}
-
-function enterNum(n) {
-    if (selectedCell===-1) return;
-    if (checkIfOriginal(selectedCell)) return;
-    sudokuPuzzle[selectedCell] = n;
-    renderSudoku();
-    if (!sudokuPuzzle.includes(0)) checkSudoku();
-}
-
-function clearCell() {
-    if (selectedCell===-1||checkIfOriginal(selectedCell)) return;
-    sudokuPuzzle[selectedCell]=0;
-    renderSudoku();
-}
-
-function checkSudoku() {
-    let errors=0;
-    for(let i=0;i<81;i++){
-        if(sudokuPuzzle[i]!==0&&sudokuPuzzle[i]!==sudokuSolution[i]){
-            const cells=document.querySelectorAll('.sudoku-cell');
-            cells[i].classList.add('error');
-            errors++;
-        }
-    }
-    const status=document.getElementById('sudokuStatus');
-    if(errors===0&&!sudokuPuzzle.includes(0)){
-        status.textContent='🎉 Puzzle Complete! Brilliant!';
-        status.style.color='#6ee7b7';
-    } else if(errors>0){
-        status.textContent=`❌ ${errors} error(s) found`;
-        status.style.color='#ff9a9a';
-    } else {
-        status.textContent='✅ Looking good so far!';
-        status.style.color='#6ee7b7';
-    }
-}
-
-// keyboard support
-document.addEventListener('keydown', e=>{
-    if(selectedCell===-1) return;
-    const n=parseInt(e.key);
-    if(n>=1&&n<=9) enterNum(n);
-    else if(e.key==='Backspace'||e.key==='Delete') clearCell();
-});
-
+let sudokuPuzzle=[],sudokuSolution=[],selectedCell=-1,originalPuzzleIdx=0;
+function solveSudoku(board){const b=[...board];function solve(){const empty=b.indexOf(0);if(empty===-1)return true;const row=Math.floor(empty/9),col=empty%9;for(let n=1;n<=9;n++){if(isValid(b,row,col,n)){b[empty]=n;if(solve())return true;b[empty]=0;}}return false;}function isValid(b,r,c,n){for(let i=0;i<9;i++){if(b[r*9+i]===n||b[i*9+c]===n)return false;}const br=Math.floor(r/3)*3,bc=Math.floor(c/3)*3;for(let i=0;i<3;i++)for(let j=0;j<3;j++)if(b[(br+i)*9+(bc+j)]===n)return false;return true;}solve();return b;}
+function newSudokuGame(){originalPuzzleIdx=Math.floor(Math.random()*PUZZLES.length);const base=PUZZLES[originalPuzzleIdx];sudokuPuzzle=[...base];sudokuSolution=solveSudoku([...base]);selectedCell=-1;renderSudoku();document.getElementById('sudokuStatus').textContent='Select a cell, then enter a number';document.getElementById('sudokuStatus').style.color='rgba(255,255,255,0.5)';}
+function checkIfOriginal(idx){return PUZZLES[originalPuzzleIdx][idx]!==0;}
+function renderSudoku(){const grid=document.getElementById('sudokuGrid');grid.innerHTML='';for(let i=0;i<81;i++){const cell=document.createElement('button');cell.className='sudoku-cell';if(checkIfOriginal(i))cell.classList.add('given');if(i===selectedCell)cell.classList.add('selected');cell.textContent=sudokuPuzzle[i]||'';cell.onclick=()=>selectCell(i);grid.appendChild(cell);}const np=document.getElementById('numpad');np.innerHTML='';for(let n=1;n<=9;n++){const b=document.createElement('button');b.className='num-btn';b.textContent=n;b.onclick=()=>enterNum(n);np.appendChild(b);}}
+function selectCell(idx){if(checkIfOriginal(idx))return;selectedCell=idx;renderSudoku();}
+function enterNum(n){if(selectedCell===-1)return;if(checkIfOriginal(selectedCell))return;sudokuPuzzle[selectedCell]=n;renderSudoku();if(!sudokuPuzzle.includes(0))checkSudoku();}
+function clearCell(){if(selectedCell===-1||checkIfOriginal(selectedCell))return;sudokuPuzzle[selectedCell]=0;renderSudoku();}
+function checkSudoku(){let errors=0;const cells=document.querySelectorAll('.sudoku-cell');for(let i=0;i<81;i++){cells[i].classList.remove('error');if(sudokuPuzzle[i]!==0&&sudokuPuzzle[i]!==sudokuSolution[i]){cells[i].classList.add('error');errors++;}}const status=document.getElementById('sudokuStatus');if(errors===0&&!sudokuPuzzle.includes(0)){status.textContent='🎉 Puzzle Complete! Brilliant!';status.style.color='#6ee7b7';}else if(errors>0){status.textContent=`❌ ${errors} error(s) found`;status.style.color='#ff9a9a';}else{status.textContent='✅ Looking good so far!';status.style.color='#6ee7b7';}}
+document.addEventListener('keydown',e=>{if(selectedCell===-1)return;const n=parseInt(e.key);if(n>=1&&n<=9)enterNum(n);else if(e.key==='Backspace'||e.key==='Delete')clearCell();});
 newSudokuGame();
-
-// ============ CHESS ============
-const PIECES = {
-    'wK':'♔','wQ':'♕','wR':'♖','wB':'♗','wN':'♘','wP':'♙',
-    'bK':'♚','bQ':'♛','bR':'♜','bB':'♝','bN':'♞','bP':'♟'
-};
-
-let chessBoard=[], chessSelected=null, chessTurn='w', chessStatus='', validMoves=[];
-
-function initChess() {
-    const back = ['R','N','B','Q','K','B','N','R'];
-    chessBoard = [];
-    for(let r=0;r<8;r++){
-        chessBoard.push([]);
-        for(let c=0;c<8;c++){
-            if(r===0) chessBoard[r][c]='b'+back[c];
-            else if(r===1) chessBoard[r][c]='bP';
-            else if(r===6) chessBoard[r][c]='wP';
-            else if(r===7) chessBoard[r][c]='w'+back[c];
-            else chessBoard[r][c]=null;
-        }
-    }
-    chessTurn='w'; chessSelected=null; validMoves=[];
-    renderChess();
-    document.getElementById('chessTurn').textContent='⚪ White\'s Turn';
-    document.getElementById('chessStatus').textContent='Click a piece to start';
-}
-
-function getValidMoves(r,c) {
-    const p=chessBoard[r][c]; if(!p) return [];
-    const col=p[0], type=p[1];
-    const moves=[];
-    const inBounds=(r,c)=>r>=0&&r<8&&c>=0&&c<8;
-    const enemy=(r2,c2)=>chessBoard[r2][c2]&&chessBoard[r2][c2][0]!==col;
-    const empty=(r2,c2)=>!chessBoard[r2][c2];
-    const addIf=(r2,c2)=>{if(inBounds(r2,c2)&&(empty(r2,c2)||enemy(r2,c2)))moves.push([r2,c2]);};
-    const slide=(dr,dc)=>{let nr=r+dr,nc=c+dc;while(inBounds(nr,nc)){if(empty(nr,nc))moves.push([nr,nc]);else{if(enemy(nr,nc))moves.push([nr,nc]);break;}nr+=dr;nc+=dc;}};
-
-    if(type==='P'){
-        const dir=col==='w'?-1:1;
-        if(inBounds(r+dir,c)&&empty(r+dir,c))moves.push([r+dir,c]);
-        if((col==='w'&&r===6)||(col==='b'&&r===1))if(empty(r+dir,c)&&empty(r+2*dir,c))moves.push([r+2*dir,c]);
-        [-1,1].forEach(dc=>{if(inBounds(r+dir,c+dc)&&enemy(r+dir,c+dc))moves.push([r+dir,c+dc]);});
-    } else if(type==='R'){slide(1,0);slide(-1,0);slide(0,1);slide(0,-1);}
-    else if(type==='B'){slide(1,1);slide(1,-1);slide(-1,1);slide(-1,-1);}
-    else if(type==='Q'){slide(1,0);slide(-1,0);slide(0,1);slide(0,-1);slide(1,1);slide(1,-1);slide(-1,1);slide(-1,-1);}
-    else if(type==='N'){[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr,dc])=>addIf(r+dr,c+dc));}
-    else if(type==='K'){[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr,dc])=>addIf(r+dr,c+dc));}
-    return moves;
-}
-
-function handleChessClick(r,c) {
-    const p=chessBoard[r][c];
-    // If a piece is selected, try to move
-    if(chessSelected){
-        const [sr,sc]=chessSelected;
-        const isValid=validMoves.some(([mr,mc])=>mr===r&&mc===c);
-        if(isValid){
-            // Move
-            chessBoard[r][c]=chessBoard[sr][sc];
-            chessBoard[sr][sc]=null;
-            // Pawn promotion
-            if(chessBoard[r][c]==='wP'&&r===0) chessBoard[r][c]='wQ';
-            if(chessBoard[r][c]==='bP'&&r===7) chessBoard[r][c]='bQ';
-            chessTurn=chessTurn==='w'?'b':'w';
-            chessSelected=null; validMoves=[];
-            renderChess();
-            document.getElementById('chessTurn').textContent=chessTurn==='w'?'⚪ White\'s Turn':'⚫ Black\'s Turn';
-            document.getElementById('chessStatus').textContent=chessTurn==='w'?'White to move':'Black to move';
-            return;
-        }
-        chessSelected=null; validMoves=[];
-    }
-    // Select a piece
-    if(p&&p[0]===chessTurn){
-        chessSelected=[r,c];
-        validMoves=getValidMoves(r,c);
-    }
-    renderChess();
-}
-
-function renderChess() {
-    const board=document.getElementById('chessBoard');
-    board.innerHTML='';
-    for(let r=0;r<8;r++){
-        for(let c=0;c<8;c++){
-            const sq=document.createElement('div');
-            sq.className='chess-sq '+((r+c)%2===0?'light':'dark');
-            if(chessSelected&&chessSelected[0]===r&&chessSelected[1]===c) sq.classList.add('selected');
-            const isValid=validMoves.some(([mr,mc])=>mr===r&&mc===c);
-            if(isValid){
-                if(chessBoard[r][c]) sq.classList.add('valid-capture');
-                else sq.classList.add('valid-move');
-            }
-            const p=chessBoard[r][c];
-            if(p) sq.textContent=PIECES[p]||p;
-            sq.onclick=()=>handleChessClick(r,c);
-            board.appendChild(sq);
-        }
-    }
-}
-
+const PIECES={'wK':'♔','wQ':'♕','wR':'♖','wB':'♗','wN':'♘','wP':'♙','bK':'♚','bQ':'♛','bR':'♜','bB':'♝','bN':'♞','bP':'♟'};
+let chessBoard=[],chessSelected=null,chessTurn='w',validMoves=[];
+function initChess(){const back=['R','N','B','Q','K','B','N','R'];chessBoard=[];for(let r=0;r<8;r++){chessBoard.push([]);for(let c=0;c<8;c++){if(r===0)chessBoard[r][c]='b'+back[c];else if(r===1)chessBoard[r][c]='bP';else if(r===6)chessBoard[r][c]='wP';else if(r===7)chessBoard[r][c]='w'+back[c];else chessBoard[r][c]=null;}}chessTurn='w';chessSelected=null;validMoves=[];renderChess();document.getElementById('chessTurn').textContent="⚪ White's Turn";document.getElementById('chessStatus').textContent='Click a piece to start';}
+function getValidMoves(r,c){const p=chessBoard[r][c];if(!p)return[];const col=p[0],type=p[1];const moves=[];const inBounds=(r,c)=>r>=0&&r<8&&c>=0&&c<8;const enemy=(r2,c2)=>chessBoard[r2][c2]&&chessBoard[r2][c2][0]!==col;const empty=(r2,c2)=>!chessBoard[r2][c2];const addIf=(r2,c2)=>{if(inBounds(r2,c2)&&(empty(r2,c2)||enemy(r2,c2)))moves.push([r2,c2]);};const slide=(dr,dc)=>{let nr=r+dr,nc=c+dc;while(inBounds(nr,nc)){if(empty(nr,nc))moves.push([nr,nc]);else{if(enemy(nr,nc))moves.push([nr,nc]);break;}nr+=dr;nc+=dc;}};if(type==='P'){const dir=col==='w'?-1:1;if(inBounds(r+dir,c)&&empty(r+dir,c))moves.push([r+dir,c]);if((col==='w'&&r===6)||(col==='b'&&r===1))if(empty(r+dir,c)&&empty(r+2*dir,c))moves.push([r+2*dir,c]);[-1,1].forEach(dc=>{if(inBounds(r+dir,c+dc)&&enemy(r+dir,c+dc))moves.push([r+dir,c+dc]);});}else if(type==='R'){slide(1,0);slide(-1,0);slide(0,1);slide(0,-1);}else if(type==='B'){slide(1,1);slide(1,-1);slide(-1,1);slide(-1,-1);}else if(type==='Q'){slide(1,0);slide(-1,0);slide(0,1);slide(0,-1);slide(1,1);slide(1,-1);slide(-1,1);slide(-1,-1);}else if(type==='N'){[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr,dc])=>addIf(r+dr,c+dc));}else if(type==='K'){[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr,dc])=>addIf(r+dr,c+dc));}return moves;}
+function handleChessClick(r,c){const p=chessBoard[r][c];if(chessSelected){const[sr,sc]=chessSelected;const isValid=validMoves.some(([mr,mc])=>mr===r&&mc===c);if(isValid){chessBoard[r][c]=chessBoard[sr][sc];chessBoard[sr][sc]=null;if(chessBoard[r][c]==='wP'&&r===0)chessBoard[r][c]='wQ';if(chessBoard[r][c]==='bP'&&r===7)chessBoard[r][c]='bQ';chessTurn=chessTurn==='w'?'b':'w';chessSelected=null;validMoves=[];renderChess();document.getElementById('chessTurn').textContent=chessTurn==='w'?"⚪ White's Turn":"⚫ Black's Turn";document.getElementById('chessStatus').textContent=chessTurn==='w'?'White to move':'Black to move';return;}chessSelected=null;validMoves=[];}if(p&&p[0]===chessTurn){chessSelected=[r,c];validMoves=getValidMoves(r,c);}renderChess();}
+function renderChess(){const board=document.getElementById('chessBoard');board.innerHTML='';for(let r=0;r<8;r++){for(let c=0;c<8;c++){const sq=document.createElement('div');sq.className='chess-sq '+((r+c)%2===0?'light':'dark');if(chessSelected&&chessSelected[0]===r&&chessSelected[1]===c)sq.classList.add('selected');const isValid=validMoves.some(([mr,mc])=>mr===r&&mc===c);if(isValid){if(chessBoard[r][c])sq.classList.add('valid-capture');else sq.classList.add('valid-move');}const p=chessBoard[r][c];if(p)sq.textContent=PIECES[p]||p;sq.onclick=()=>handleChessClick(r,c);board.appendChild(sq);}}}
 function newChessGame(){initChess();}
 initChess();
-
-// Labels
 const files=['a','b','c','d','e','f','g','h'];
-const fl=document.getElementById('chessFiles');
-fl.innerHTML=files.map(f=>`<span>${f}</span>`).join('');
-
-// Particles
+document.getElementById('chessFiles').innerHTML=files.map(f=>`<span>${f}</span>`).join('');
 function makeParticles(){const colors=['#7ec8f7','#a78bfa','#6ee7b7','#fde68a'];for(let p=0;p<14;p++){const el=document.createElement('div');el.className='particle';const size=Math.random()*5+2;el.style.cssText=`width:${size}px;height:${size}px;left:${Math.random()*100}vw;background:${colors[Math.floor(Math.random()*colors.length)]};animation-duration:${Math.random()*12+8}s;animation-delay:${Math.random()*-15}s;opacity:${Math.random()*0.4+0.1}`;document.body.appendChild(el);}}
 makeParticles();
 </script>
@@ -1802,14 +1696,8 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
     <div class="profile-name">{{ user[0] }}</div>
     <div class="profile-mobile">📱 {{ user[1] or 'No mobile on file' }}</div>
     <div class="stats-grid">
-        <div class="stat-box">
-            <div class="stat-val">{{ count }}</div>
-            <div class="stat-label">Total Check-ins</div>
-        </div>
-        <div class="stat-box">
-            <div class="stat-val">{{ "%.0f"|format(avg) if avg else '—' }}</div>
-            <div class="stat-label">Avg. Wellness Score</div>
-        </div>
+        <div class="stat-box"><div class="stat-val">{{ count }}</div><div class="stat-label">Total Check-ins</div></div>
+        <div class="stat-box"><div class="stat-val">{{ "%.0f"|format(avg) if avg else '—' }}</div><div class="stat-label">Avg. Wellness Score</div></div>
     </div>
     <a class="back-btn" href="/">← Back to Home</a>
 </div>
@@ -1884,12 +1772,8 @@ h2{font-family:'Playfair Display',serif;font-size:1.6rem;margin-bottom:24px;}
 </div>
 <script>
 const saved = localStorage.getItem('mindspace-theme');
-if (saved === 'light') document.getElementById('darkToggle').checked = false;
-else document.getElementById('darkToggle').checked = true;
-
-function toggleTheme(cb) {
-    localStorage.setItem('mindspace-theme', cb.checked ? 'dark' : 'light');
-}
+document.getElementById('darkToggle').checked = saved !== 'light';
+function toggleTheme(cb) { localStorage.setItem('mindspace-theme', cb.checked ? 'dark' : 'light'); }
 </script>
 </body>
 </html>
@@ -1901,17 +1785,14 @@ function toggleTheme(cb) {
 def history():
     if "user" not in session:
         return redirect("/login")
-
     conn = sqlite3.connect("app.db")
     cur = conn.cursor()
     cur.execute("SELECT score, status FROM results WHERE username=? ORDER BY id DESC LIMIT 20", (session["user"],))
     rows = cur.fetchall()
     conn.close()
-
-    data   = [r[0] for r in reversed(rows)]
-    labels = list(range(1, len(data)+1))
+    data     = [r[0] for r in reversed(rows)]
+    labels   = list(range(1, len(data)+1))
     statuses = [r[1] for r in reversed(rows)]
-
     return render_template_string("""
 <!DOCTYPE html>
 <html>
@@ -1926,8 +1807,6 @@ def history():
 body{font-family:'Nunito',sans-serif;min-height:100vh;background:#0d0d1a;display:flex;flex-direction:column;align-items:center;padding:100px 16px 40px;position:relative;}
 body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 20% 40%,rgba(100,200,255,0.1) 0%,transparent 60%),radial-gradient(ellipse 60% 80% at 80% 20%,rgba(180,120,255,0.1) 0%,transparent 60%);animation:aurora 10s ease-in-out infinite alternate;pointer-events:none;}
 @keyframes aurora{0%{transform:scale(1);}100%{transform:scale(1.08) rotate(-2deg);}}
-.particle{position:fixed;border-radius:50%;pointer-events:none;animation:float linear infinite;}
-@keyframes float{0%{transform:translateY(110vh) scale(0);opacity:0;}10%{opacity:0.5;}90%{opacity:0.3;}100%{transform:translateY(-10vh) scale(1.2);opacity:0;}}
 .topnav{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:rgba(13,13,26,0.85);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,0.07);z-index:100;}
 .brand{font-family:'Playfair Display',serif;font-size:1.2rem;color:#fff;}
 .nav-links a{color:rgba(255,255,255,0.5);text-decoration:none;font-size:0.82rem;font-weight:700;margin-left:16px;padding:6px 14px;border-radius:20px;border:1px solid rgba(255,255,255,0.1);transition:all 0.2s;}
@@ -1967,10 +1846,6 @@ gradient.addColorStop(1,'rgba(167,139,250,0.0)');
 new Chart(ctx,{type:'line',data:{labels:{{ labels|tojson }}.map(l=>'Check-in '+l),datasets:[{label:'Wellness Score',data:{{ data|tojson }},fill:true,backgroundColor:gradient,borderColor:'#5bc8f5',borderWidth:2.5,pointBackgroundColor:'#a78bfa',pointBorderColor:'#fff',pointBorderWidth:2,pointRadius:5,pointHoverRadius:8,tension:0.4}]},options:{responsive:true,plugins:{legend:{display:false},tooltip:{backgroundColor:'rgba(13,13,26,0.9)',borderColor:'rgba(255,255,255,0.1)',borderWidth:1,titleColor:'#fff',bodyColor:'rgba(255,255,255,0.6)',padding:12}},scales:{x:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'rgba(255,255,255,0.4)',font:{family:'Nunito',size:11}}},y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'rgba(255,255,255,0.4)',font:{family:'Nunito',size:11}}}}}});
 </script>
 {% endif %}
-<script>
-function makeParticles(){const colors=['#7ec8f7','#a78bfa','#6ee7b7'];for(let p=0;p<14;p++){const el=document.createElement('div');el.className='particle';const size=Math.random()*5+2;el.style.cssText=`width:${size}px;height:${size}px;left:${Math.random()*100}vw;background:${colors[Math.floor(Math.random()*colors.length)]};animation-duration:${Math.random()*12+8}s;animation-delay:${Math.random()*-15}s;opacity:${Math.random()*0.4+0.1}`;document.body.appendChild(el);}}
-makeParticles();
-</script>
 </body>
 </html>
 """, data=data, labels=labels, statuses=statuses)
@@ -1985,6 +1860,5 @@ def logout():
 
 # ---------------- RUN ----------------
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
