@@ -6,8 +6,9 @@ import string
 import os
 
 app = Flask(__name__)
-# FIX 1: Use env var for secret key so sessions persist properly across restarts
-app.secret_key = os.environ.get("SECRET_KEY", "dev-fallback-change-in-production-" + "x"*32)
+# FIX: Use a FIXED secret key so sessions survive server restarts
+# In production, set SECRET_KEY env var to a long random string
+app.secret_key = os.environ.get("SECRET_KEY", "mindspace-super-secret-key-change-in-prod-2024")
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False  # Set True if HTTPS
 
@@ -57,12 +58,8 @@ questions = [
 
 BINAURAL = "https://youtu.be/lkkGlVWvkLk"
 
-# -------- OPTIONAL: Twilio SMS (set env vars to enable) --------
+# -------- OPTIONAL: Twilio SMS --------
 def send_otp_sms(mobile, otp):
-    """
-    To enable real SMS: pip install twilio
-    Set env vars: TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM
-    """
     sid   = os.environ.get("TWILIO_SID")
     token = os.environ.get("TWILIO_TOKEN")
     from_ = os.environ.get("TWILIO_FROM")
@@ -77,7 +74,7 @@ def send_otp_sms(mobile, otp):
             return True
         except Exception as e:
             print(f"SMS error: {e}")
-    return False  # Falls back to demo display
+    return False
 
 # ---------------- SHARED STYLES ----------------
 BASE_STYLES = """
@@ -340,12 +337,12 @@ def signup():
                 conn.commit()
                 conn.close()
                 sms_sent = send_otp_sms(m, otp)
+                # FIX: Store all pending info in session
                 session['pending_mobile'] = m
                 session['pending_username'] = u
-                # FIX 2: Always store demo OTP in session for display
-                # In production with Twilio configured, you'd remove this
-                session['demo_otp'] = otp
+                session['demo_otp'] = otp   # always store for demo display
                 session['sms_sent'] = sms_sent
+                session.modified = True     # FIX: Force Flask to save session
                 return redirect("/verify-otp")
 
     return render_template_string("""
@@ -370,10 +367,10 @@ def signup():
     {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
     <form method="post" autocomplete="off">
         <div class="input-group">
-            <input name="username" required placeholder="👤  Username" autofocus value="{{ request.form.get('username','') }}">
+            <input name="username" required placeholder="👤  Username" autofocus value="{{ req_username }}">
         </div>
         <div class="input-group">
-            <input name="mobile" type="tel" required placeholder="📱  Mobile Number" value="{{ request.form.get('mobile','') }}">
+            <input name="mobile" type="tel" required placeholder="📱  Mobile Number" value="{{ req_mobile }}">
         </div>
         <button class="btn btn-primary" type="submit">Send OTP 📲</button>
     </form>
@@ -382,17 +379,20 @@ def signup():
 <script>{{ particles }}</script>
 </body>
 </html>
-""", styles=BASE_STYLES, particles=PARTICLES_JS, error=error, request=request)
+""", styles=BASE_STYLES, particles=PARTICLES_JS, error=error,
+     req_username=request.form.get('username',''),
+     req_mobile=request.form.get('mobile',''))
 
 
 # ---------------- VERIFY OTP (Step 2) ----------------
 @app.route("/verify-otp", methods=["GET","POST"])
 def verify_otp():
-    # FIX 3: Better session check with clear redirect
+    # FIX: Guard — if session is missing, redirect to signup
     if 'pending_mobile' not in session or 'pending_username' not in session:
         return redirect("/signup")
 
     error = ""
+    # FIX: Read demo_otp from session, not recomputed
     demo_otp = session.get('demo_otp', '')
     sms_sent = session.get('sms_sent', False)
 
@@ -402,8 +402,7 @@ def verify_otp():
         if not entered or len(entered) != 6:
             error = "❌ Please enter the complete 6-digit OTP."
         else:
-            # FIX 4: Fetch OTP from DB and compare — this was correct, but
-            # now we also verify the username matches to prevent session confusion
+            # FIX: Fetch from DB AND match username to prevent session mix-up
             conn = sqlite3.connect("app.db")
             cur = conn.cursor()
             cur.execute("SELECT otp, username FROM otp_store WHERE mobile=?",
@@ -413,7 +412,8 @@ def verify_otp():
 
             if row and row[0] == entered and row[1] == session['pending_username']:
                 session['otp_verified'] = True
-                # Clear OTP from DB after use (one-time use)
+                session.modified = True  # FIX: force session save
+                # Delete OTP from DB (one-time use)
                 conn = sqlite3.connect("app.db")
                 cur = conn.cursor()
                 cur.execute("DELETE FROM otp_store WHERE mobile=?", (session['pending_mobile'],))
@@ -436,13 +436,13 @@ def verify_otp():
     background: rgba(110,231,183,0.1);
     border: 1px solid rgba(110,231,183,0.3);
     color: #6ee7b7;
-    padding: 10px 14px;
+    padding: 14px;
     border-radius: 10px;
-    font-size: 0.82rem;
+    font-size: 0.85rem;
     margin-bottom: 14px;
     text-align: center;
 }
-.otp-demo strong { font-size: 1.4rem; letter-spacing: 6px; display: block; margin-top: 4px; }
+.otp-demo strong { font-size: 1.8rem; letter-spacing: 8px; display: block; margin-top: 6px; color: #fff; }
 .otp-inputs { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
 .otp-inputs input {
     width: 48px !important; height: 56px;
@@ -491,7 +491,6 @@ def verify_otp():
 const boxes = document.querySelectorAll('.otp-box');
 boxes.forEach((box, i) => {
     box.addEventListener('input', e => {
-        // Only allow digits
         box.value = box.value.replace(/[^0-9]/g, '');
         if (box.value && i < boxes.length - 1) boxes[i+1].focus();
         updateHidden();
@@ -499,16 +498,12 @@ boxes.forEach((box, i) => {
     box.addEventListener('keydown', e => {
         if (e.key === 'Backspace' && !box.value && i > 0) boxes[i-1].focus();
     });
-    // Handle paste
     box.addEventListener('paste', e => {
         e.preventDefault();
         const text = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g,'');
-        [...text.slice(0,6)].forEach((ch, idx) => {
-            if (boxes[idx]) boxes[idx].value = ch;
-        });
+        [...text.slice(0,6)].forEach((ch, idx) => { if (boxes[idx]) boxes[idx].value = ch; });
         updateHidden();
-        const next = Math.min(text.length, 5);
-        boxes[next].focus();
+        boxes[Math.min(text.length, 5)].focus();
     });
 });
 function updateHidden() {
@@ -526,7 +521,7 @@ document.getElementById('otpForm').addEventListener('submit', e => { updateHidde
 # ---------------- SET PASSWORD (Step 3) ----------------
 @app.route("/set-password", methods=["GET","POST"])
 def set_password():
-    # FIX 5: Both guards must pass
+    # FIX: Both session flags must exist
     if not session.get('otp_verified') or 'pending_username' not in session:
         return redirect("/signup")
 
@@ -543,23 +538,22 @@ def set_password():
             try:
                 conn = sqlite3.connect("app.db")
                 cur = conn.cursor()
-                # FIX 6: Check username collision before inserting
+                # FIX: Check for collision before insert
                 cur.execute("SELECT id FROM users WHERE username=?", (session['pending_username'],))
                 if cur.fetchone():
                     conn.close()
                     error = "⚠️ Username already taken. Please restart signup."
                 else:
-                    cur.execute("INSERT INTO users (username, mobile, password) VALUES (?,?,?)",
-                                (session['pending_username'], session['pending_mobile'], hashed))
+                    cur.execute(
+                        "INSERT INTO users (username, mobile, password) VALUES (?,?,?)",
+                        (session['pending_username'], session['pending_mobile'], hashed)
+                    )
                     conn.commit()
                     conn.close()
-                    # Save username before clearing session
-                    registered_user = session['pending_username']
-                    session.pop('pending_mobile', None)
-                    session.pop('pending_username', None)
-                    session.pop('otp_verified', None)
-                    session.pop('demo_otp', None)
-                    session.pop('sms_sent', None)
+                    # FIX: Clear only signup-related session keys, not everything
+                    for k in ['pending_mobile','pending_username','otp_verified','demo_otp','sms_sent']:
+                        session.pop(k, None)
+                    session.modified = True
                     return redirect("/login?registered=1")
             except Exception as ex:
                 print(f"Signup error: {ex}")
@@ -606,7 +600,7 @@ def login():
     error = ""
     success = ""
     if request.args.get('registered'):
-        success = "🎉 Account created! Please log in."
+        success = "🎉 Account created successfully! Please log in."
 
     if request.method == "POST":
         u = request.form.get("username","").strip()
@@ -617,13 +611,15 @@ def login():
         else:
             conn = sqlite3.connect("app.db")
             cur = conn.cursor()
-            cur.execute("SELECT password FROM users WHERE username=?", (u,))
+            # FIX: Select both password AND username to confirm row exists
+            cur.execute("SELECT id, password FROM users WHERE username=?", (u,))
             user = cur.fetchone()
             conn.close()
-            # FIX 7: More informative — won't help attacker since both cases say "invalid"
-            if user and check_password_hash(user[0], p):
-                session.clear()  # Clear any stale session data first
+
+            if user and check_password_hash(user[1], p):
+                session.clear()
                 session["user"] = u
+                session.modified = True  # FIX: force session persistence
                 return redirect("/")
             else:
                 error = "❌ Invalid username or password."
@@ -660,7 +656,7 @@ def login():
 """, styles=BASE_STYLES, particles=PARTICLES_JS, error=error, success=success)
 
 
-# ---------------- HOME (with Solar System) ----------------
+# ---------------- HOME (Solar System) ----------------
 @app.route("/")
 def home():
     if "user" not in session:
@@ -716,19 +712,17 @@ body {
     transition: background 0.4s;
 }
 
-/* ===== SOLAR SYSTEM BACKGROUND ===== */
+/* ===== SOLAR SYSTEM CANVAS ===== */
 #solar-canvas {
     position: fixed;
     top: 0; left: 0;
     width: 100%; height: 100%;
     z-index: 0;
     pointer-events: none;
-    opacity: 0.55;
+    opacity: 0.6;
 }
+body.light-mode #solar-canvas { opacity: 0.2; }
 
-body.light-mode #solar-canvas { opacity: 0.25; }
-
-/* Aurora overlay on top of solar system */
 body::before {
     content: '';
     position: fixed;
@@ -756,31 +750,17 @@ body::before {
     z-index: 100;
 }
 
-.brand {
-    font-family: 'Playfair Display', serif;
-    font-size: 1.2rem;
-    color: var(--text);
-}
+.brand { font-family: 'Playfair Display', serif; font-size: 1.2rem; color: var(--text); }
 
-.nav-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    position: relative;
-}
+.nav-right { display: flex; align-items: center; gap: 12px; position: relative; }
 
 .profile-btn {
-    width: 38px; height: 38px;
-    border-radius: 50%;
+    width: 38px; height: 38px; border-radius: 50%;
     background: linear-gradient(135deg, #5bc8f5, #a78bfa);
     border: 2px solid rgba(255,255,255,0.2);
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    font-weight: 800;
-    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem; font-weight: 800; color: #fff;
     transition: transform 0.2s, box-shadow 0.2s;
     user-select: none;
 }
@@ -789,8 +769,7 @@ body::before {
 .profile-dropdown {
     display: none;
     position: absolute;
-    top: calc(100% + 10px);
-    right: 0;
+    top: calc(100% + 10px); right: 0;
     background: rgba(20,20,40,0.97);
     backdrop-filter: blur(20px);
     border: 1px solid rgba(255,255,255,0.12);
@@ -895,13 +874,10 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
     border-radius: 20px;
     padding: 22px 18px;
     text-decoration: none;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    display: flex; flex-direction: column; gap: 10px;
     cursor: pointer;
     transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s;
-    position: relative;
-    overflow: hidden;
+    position: relative; overflow: hidden;
 }
 .feature-card::before {
     content: ''; position: absolute; inset: 0;
@@ -909,21 +885,20 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
 }
 .feature-card:hover { transform: translateY(-4px); box-shadow: 0 12px 36px rgba(0,0,0,0.3); }
 .feature-card:hover::before { opacity: 1; }
-.feature-card.test::before { background: radial-gradient(ellipse at top left, rgba(91,200,245,0.12), transparent 70%); }
-.feature-card.score::before { background: radial-gradient(ellipse at top left, rgba(167,139,250,0.12), transparent 70%); }
-.feature-card.therapy::before { background: radial-gradient(ellipse at top left, rgba(110,231,183,0.12), transparent 70%); }
-.feature-card.games::before { background: radial-gradient(ellipse at top left, rgba(253,230,138,0.12), transparent 70%); }
+.feature-card.test::before   { background: radial-gradient(ellipse at top left, rgba(91,200,245,0.12), transparent 70%); }
+.feature-card.score::before  { background: radial-gradient(ellipse at top left, rgba(167,139,250,0.12), transparent 70%); }
+.feature-card.therapy::before{ background: radial-gradient(ellipse at top left, rgba(110,231,183,0.12), transparent 70%); }
+.feature-card.games::before  { background: radial-gradient(ellipse at top left, rgba(253,230,138,0.12), transparent 70%); }
 
-.card-icon { font-size: 2rem; line-height: 1; }
+.card-icon  { font-size: 2rem; line-height: 1; }
 .card-title { font-size: 0.95rem; font-weight: 800; color: var(--text); line-height: 1.3; }
-.card-desc { font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
+.card-desc  { font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
 
 .score-badge {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 12px; border-radius: 99px;
     font-size: 0.78rem; font-weight: 800; margin-top: 6px;
 }
-
 .card-arrow { position: absolute; top: 16px; right: 16px; color: var(--text-muted); font-size: 0.9rem; opacity: 0.5; }
 </style>
 </head>
@@ -955,9 +930,9 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
                 </label>
             </div>
             <div class="dropdown-divider"></div>
-            <a href="/profile" class="dropdown-item">👤 View Profile</a>
+            <a href="/profile"  class="dropdown-item">👤 View Profile</a>
             <a href="/settings" class="dropdown-item">⚙️ Settings</a>
-            <a href="/history" class="dropdown-item">📈 History</a>
+            <a href="/history"  class="dropdown-item">📈 History</a>
             <div class="dropdown-divider"></div>
             <a href="/logout" class="dropdown-item danger">👋 Log Out</a>
         </div>
@@ -1020,16 +995,13 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
     function resize() {
         W = canvas.width  = window.innerWidth;
         H = canvas.height = window.innerHeight;
-        cx = W / 2;
-        cy = H / 2;
+        cx = W / 2; cy = H / 2;
         scale = Math.min(W, H) / 900;
     }
     resize();
     window.addEventListener('resize', resize);
 
-    // Sun + planets config
     const SUN_R = 28;
-
     const planets = [
         { name:'Mercury', r:5,  orbitR:80,  speed:4.1,   color:'#b5b5b5', glow:'rgba(181,181,181,0.4)', angle:0,    moons:[] },
         { name:'Venus',   r:9,  orbitR:130, speed:1.6,   color:'#e8cda0', glow:'rgba(232,205,160,0.4)', angle:1.2,  moons:[] },
@@ -1038,34 +1010,30 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
         { name:'Mars',    r:7,  orbitR:245, speed:0.53,  color:'#c1440e', glow:'rgba(193,68,14,0.4)',   angle:0.8,
           moons:[{ r:2, orbitR:15, speed:22, color:'#aaa', angle:1 }] },
         { name:'Jupiter', r:22, orbitR:330, speed:0.084, color:'#c88b3a', glow:'rgba(200,139,58,0.35)', angle:3.5,
-          bands: ['#c88b3a','#e0a96d','#a0682a','#d4a06a'],
+          bands: true,
           moons:[
             { r:3, orbitR:32, speed:8.9,  color:'#f0c040', angle:0 },
             { r:2, orbitR:42, speed:4.5,  color:'#c0b0a0', angle:2 },
           ]
         },
         { name:'Saturn',  r:18, orbitR:420, speed:0.034, color:'#e4d191', glow:'rgba(228,209,145,0.35)', angle:1.0,
-          rings: true,
-          moons:[{ r:3, orbitR:36, speed:5.3, color:'#e0d8c0', angle:1.5 }]
+          rings: true, moons:[{ r:3, orbitR:36, speed:5.3, color:'#e0d8c0', angle:1.5 }]
         },
         { name:'Uranus',  r:13, orbitR:500, speed:0.012, color:'#7de8e8', glow:'rgba(125,232,232,0.35)', angle:4.2, moons:[] },
         { name:'Neptune', r:12, orbitR:570, speed:0.006, color:'#4b70dd', glow:'rgba(75,112,221,0.35)',  angle:5.1, moons:[] },
     ];
 
-    // Star field
-    const stars = Array.from({length:180}, () => ({
-        x: Math.random(),
-        y: Math.random(),
-        r: Math.random() * 1.4 + 0.2,
+    const stars = Array.from({length:200}, () => ({
+        x: Math.random(), y: Math.random(),
+        r: Math.random() * 1.5 + 0.2,
         opacity: Math.random() * 0.7 + 0.2,
         twinkle: Math.random() * Math.PI * 2,
-        twinkleSpeed: (Math.random() * 0.02 + 0.005)
+        twinkleSpeed: Math.random() * 0.02 + 0.005
     }));
 
-    // Asteroid belt particles
-    const asteroids = Array.from({length:60}, () => ({
+    const asteroids = Array.from({length:70}, () => ({
         angle: Math.random() * Math.PI * 2,
-        orbitR: 278 + (Math.random() - 0.5) * 24,
+        orbitR: 278 + (Math.random() - 0.5) * 26,
         speed: 0.18 + Math.random() * 0.12,
         r: Math.random() * 1.5 + 0.3,
         opacity: Math.random() * 0.5 + 0.2
@@ -1073,206 +1041,112 @@ body.light-mode .toggle-track { background: rgba(0,0,0,0.12); }
 
     let t = 0;
 
-    function drawSun(cx, cy, sc) {
-        // Outer glow rings
-        [80,55,35].forEach((gr, i) => {
-            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, gr * sc);
-            grad.addColorStop(0, `rgba(255,200,80,${0.06 - i*0.015})`);
+    function drawSun() {
+        [80,55,35].forEach((gr) => {
+            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, gr * scale);
+            grad.addColorStop(0, 'rgba(255,200,80,0.06)');
             grad.addColorStop(1, 'rgba(255,200,80,0)');
             ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(cx, cy, gr * sc, 0, Math.PI*2);
-            ctx.fill();
+            ctx.beginPath(); ctx.arc(cx, cy, gr * scale, 0, Math.PI*2); ctx.fill();
         });
-
-        // Corona flare animation
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.rotate(t * 0.001);
+        ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.001);
         for (let i = 0; i < 8; i++) {
-            ctx.save();
-            ctx.rotate((i / 8) * Math.PI * 2);
-            const fGrad = ctx.createLinearGradient(0, 0, 0, -SUN_R * sc * 2.2);
-            fGrad.addColorStop(0, 'rgba(255,220,80,0.18)');
-            fGrad.addColorStop(1, 'rgba(255,140,0,0)');
+            ctx.save(); ctx.rotate((i / 8) * Math.PI * 2);
+            const fGrad = ctx.createLinearGradient(0, 0, 0, -SUN_R * scale * 2.2);
+            fGrad.addColorStop(0, 'rgba(255,220,80,0.18)'); fGrad.addColorStop(1, 'rgba(255,140,0,0)');
             ctx.fillStyle = fGrad;
-            ctx.beginPath();
-            ctx.moveTo(-3 * sc, 0);
-            ctx.quadraticCurveTo(0, -SUN_R * sc * 1.5, 3 * sc, 0);
-            ctx.fill();
+            ctx.beginPath(); ctx.moveTo(-3*scale, 0); ctx.quadraticCurveTo(0, -SUN_R*scale*1.5, 3*scale, 0); ctx.fill();
             ctx.restore();
         }
         ctx.restore();
-
-        // Main sun body
-        const sunGrad = ctx.createRadialGradient(
-            cx - SUN_R*sc*0.3, cy - SUN_R*sc*0.3, 0,
-            cx, cy, SUN_R * sc
-        );
-        sunGrad.addColorStop(0,   '#fff7a0');
-        sunGrad.addColorStop(0.3, '#ffe066');
-        sunGrad.addColorStop(0.7, '#ff9900');
-        sunGrad.addColorStop(1,   '#ff6600');
+        const sunGrad = ctx.createRadialGradient(cx-SUN_R*scale*0.3, cy-SUN_R*scale*0.3, 0, cx, cy, SUN_R*scale);
+        sunGrad.addColorStop(0, '#fff7a0'); sunGrad.addColorStop(0.3, '#ffe066');
+        sunGrad.addColorStop(0.7, '#ff9900'); sunGrad.addColorStop(1, '#ff6600');
         ctx.fillStyle = sunGrad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, SUN_R * sc, 0, Math.PI*2);
-        ctx.fill();
-    }
-
-    function drawOrbit(cx, cy, r, sc) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * sc, 0, Math.PI*2);
-        ctx.stroke();
-    }
-
-    function drawPlanet(p, sc) {
-        const angle = p.angle + t * p.speed * 0.0008;
-        const px = cx + Math.cos(angle) * p.orbitR * sc;
-        const py = cy + Math.sin(angle) * p.orbitR * sc;
-        const pr = p.r * sc;
-
-        // Glow
-        if (p.glow) {
-            const gGrad = ctx.createRadialGradient(px, py, 0, px, py, pr * 3);
-            gGrad.addColorStop(0, p.glow);
-            gGrad.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = gGrad;
-            ctx.beginPath();
-            ctx.arc(px, py, pr * 3, 0, Math.PI*2);
-            ctx.fill();
-        }
-
-        // Saturn rings (behind planet)
-        if (p.rings) {
-            ctx.save();
-            ctx.translate(px, py);
-            ctx.scale(1, 0.3);
-            const ringGrad = ctx.createRadialGradient(0, 0, pr * 1.3, 0, 0, pr * 2.6);
-            ringGrad.addColorStop(0,   'rgba(228,209,145,0.55)');
-            ringGrad.addColorStop(0.5, 'rgba(200,180,120,0.35)');
-            ringGrad.addColorStop(1,   'rgba(180,160,100,0)');
-            ctx.fillStyle = ringGrad;
-            ctx.beginPath();
-            ctx.arc(0, 0, pr * 2.6, 0, Math.PI*2);
-            ctx.fill();
-            ctx.restore();
-        }
-
-        // Planet body
-        const pGrad = ctx.createRadialGradient(
-            px - pr*0.3, py - pr*0.3, 0,
-            px, py, pr
-        );
-
-        if (p.name === 'Jupiter' && p.bands) {
-            pGrad.addColorStop(0,   '#e8b870');
-            pGrad.addColorStop(0.5, '#c88b3a');
-            pGrad.addColorStop(1,   '#8a5a20');
-        } else if (p.name === 'Earth') {
-            pGrad.addColorStop(0,   '#7dc8ff');
-            pGrad.addColorStop(0.4, '#4f9fff');
-            pGrad.addColorStop(0.8, '#2a5fc0');
-            pGrad.addColorStop(1,   '#1a3a80');
-        } else {
-            pGrad.addColorStop(0, lighten(p.color, 50));
-            pGrad.addColorStop(0.6, p.color);
-            pGrad.addColorStop(1, darken(p.color, 50));
-        }
-
-        ctx.fillStyle = pGrad;
-        ctx.beginPath();
-        ctx.arc(px, py, pr, 0, Math.PI*2);
-        ctx.fill();
-
-        // Jupiter bands
-        if (p.name === 'Jupiter') {
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(px, py, pr, 0, Math.PI*2);
-            ctx.clip();
-            ['rgba(160,90,30,0.3)','rgba(220,170,90,0.2)','rgba(140,80,20,0.25)'].forEach((bc, i) => {
-                const by = py - pr + (pr * 2 / 4) * (i+1);
-                ctx.fillStyle = bc;
-                ctx.fillRect(px - pr, by - 2, pr*2, 4 + i*2);
-            });
-            ctx.restore();
-        }
-
-        // Moons
-        if (p.moons) {
-            p.moons.forEach(m => {
-                const ma = m.angle + t * m.speed * 0.0008;
-                const mr2 = m.orbitR * sc;
-                const mx = px + Math.cos(ma) * mr2;
-                const my = py + Math.sin(ma) * mr2;
-                ctx.fillStyle = m.color;
-                ctx.beginPath();
-                ctx.arc(mx, my, m.r * sc, 0, Math.PI*2);
-                ctx.fill();
-            });
-        }
-
-        return { x: px, y: py };
+        ctx.beginPath(); ctx.arc(cx, cy, SUN_R*scale, 0, Math.PI*2); ctx.fill();
     }
 
     function lighten(hex, amt) {
-        const num = parseInt(hex.replace('#',''), 16);
-        const r = Math.min(255, (num >> 16) + amt);
-        const g = Math.min(255, ((num >> 8) & 0xff) + amt);
-        const b = Math.min(255, (num & 0xff) + amt);
-        return `rgb(${r},${g},${b})`;
+        const n = parseInt(hex.replace('#',''), 16);
+        return `rgb(${Math.min(255,(n>>16)+amt)},${Math.min(255,((n>>8)&0xff)+amt)},${Math.min(255,(n&0xff)+amt)})`;
+    }
+    function darken(hex, amt) {
+        const n = parseInt(hex.replace('#',''), 16);
+        return `rgb(${Math.max(0,(n>>16)-amt)},${Math.max(0,((n>>8)&0xff)-amt)},${Math.max(0,(n&0xff)-amt)})`;
     }
 
-    function darken(hex, amt) {
-        const num = parseInt(hex.replace('#',''), 16);
-        const r = Math.max(0, (num >> 16) - amt);
-        const g = Math.max(0, ((num >> 8) & 0xff) - amt);
-        const b = Math.max(0, (num & 0xff) - amt);
-        return `rgb(${r},${g},${b})`;
+    function drawPlanet(p) {
+        const angle = p.angle + t * p.speed * 0.0008;
+        const px = cx + Math.cos(angle) * p.orbitR * scale;
+        const py = cy + Math.sin(angle) * p.orbitR * scale;
+        const pr = p.r * scale;
+
+        if (p.glow) {
+            const gGrad = ctx.createRadialGradient(px, py, 0, px, py, pr*3);
+            gGrad.addColorStop(0, p.glow); gGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = gGrad; ctx.beginPath(); ctx.arc(px, py, pr*3, 0, Math.PI*2); ctx.fill();
+        }
+
+        if (p.rings) {
+            ctx.save(); ctx.translate(px, py); ctx.scale(1, 0.3);
+            const rg = ctx.createRadialGradient(0, 0, pr*1.3, 0, 0, pr*2.6);
+            rg.addColorStop(0, 'rgba(228,209,145,0.55)'); rg.addColorStop(0.5, 'rgba(200,180,120,0.35)'); rg.addColorStop(1, 'rgba(180,160,100,0)');
+            ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(0, 0, pr*2.6, 0, Math.PI*2); ctx.fill(); ctx.restore();
+        }
+
+        const pGrad = ctx.createRadialGradient(px-pr*0.3, py-pr*0.3, 0, px, py, pr);
+        if (p.name === 'Jupiter') {
+            pGrad.addColorStop(0, '#e8b870'); pGrad.addColorStop(0.5, '#c88b3a'); pGrad.addColorStop(1, '#8a5a20');
+        } else if (p.name === 'Earth') {
+            pGrad.addColorStop(0, '#7dc8ff'); pGrad.addColorStop(0.4, '#4f9fff'); pGrad.addColorStop(0.8, '#2a5fc0'); pGrad.addColorStop(1, '#1a3a80');
+        } else {
+            pGrad.addColorStop(0, lighten(p.color, 50)); pGrad.addColorStop(0.6, p.color); pGrad.addColorStop(1, darken(p.color, 50));
+        }
+        ctx.fillStyle = pGrad; ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI*2); ctx.fill();
+
+        if (p.name === 'Jupiter') {
+            ctx.save(); ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI*2); ctx.clip();
+            ['rgba(160,90,30,0.3)','rgba(220,170,90,0.2)','rgba(140,80,20,0.25)'].forEach((bc, i) => {
+                ctx.fillStyle = bc; ctx.fillRect(px-pr, py-pr+(pr*2/4)*(i+1)-2, pr*2, 4+i*2);
+            }); ctx.restore();
+        }
+
+        if (p.moons) {
+            p.moons.forEach(m => {
+                const ma = m.angle + t * m.speed * 0.0008;
+                const mx2 = px + Math.cos(ma) * m.orbitR * scale;
+                const my2 = py + Math.sin(ma) * m.orbitR * scale;
+                ctx.fillStyle = m.color; ctx.beginPath(); ctx.arc(mx2, my2, m.r*scale, 0, Math.PI*2); ctx.fill();
+            });
+        }
     }
 
     function animate() {
         ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#0a0a18'; ctx.fillRect(0, 0, W, H);
 
-        // Space background
-        ctx.fillStyle = '#0a0a18';
-        ctx.fillRect(0, 0, W, H);
-
-        // Stars with twinkle
         stars.forEach(s => {
             s.twinkle += s.twinkleSpeed;
-            const op = s.opacity * (0.7 + 0.3 * Math.sin(s.twinkle));
-            ctx.fillStyle = `rgba(255,255,255,${op})`;
-            ctx.beginPath();
-            ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI*2);
-            ctx.fill();
+            ctx.fillStyle = `rgba(255,255,255,${s.opacity*(0.7+0.3*Math.sin(s.twinkle))})`;
+            ctx.beginPath(); ctx.arc(s.x*W, s.y*H, s.r, 0, Math.PI*2); ctx.fill();
         });
 
-        const sc = scale;
-
-        // Orbit paths
-        planets.forEach(p => drawOrbit(cx, cy, p.orbitR, sc));
+        // Orbit rings
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
+        planets.forEach(p => { ctx.beginPath(); ctx.arc(cx, cy, p.orbitR*scale, 0, Math.PI*2); ctx.stroke(); });
 
         // Asteroid belt
         asteroids.forEach(a => {
             a.angle += a.speed * 0.0004;
-            const ax = cx + Math.cos(a.angle) * a.orbitR * sc;
-            const ay = cy + Math.sin(a.angle) * a.orbitR * sc;
             ctx.fillStyle = `rgba(180,160,140,${a.opacity})`;
-            ctx.beginPath();
-            ctx.arc(ax, ay, a.r * sc, 0, Math.PI*2);
-            ctx.fill();
+            ctx.beginPath(); ctx.arc(cx+Math.cos(a.angle)*a.orbitR*scale, cy+Math.sin(a.angle)*a.orbitR*scale, a.r*scale, 0, Math.PI*2); ctx.fill();
         });
 
-        drawSun(cx, cy, sc);
-        planets.forEach(p => drawPlanet(p, sc));
-
+        drawSun();
+        planets.forEach(p => drawPlanet(p));
         t++;
         requestAnimationFrame(animate);
     }
-
     animate();
 })();
 
@@ -1287,18 +1161,15 @@ document.addEventListener('click', e => {
     }
 });
 
+// FIX: Theme logic — dark mode = toggle checked
 const savedTheme = localStorage.getItem('mindspace-theme');
-if (savedTheme === 'light') {
-    document.body.classList.add('light-mode');
-    document.getElementById('themeToggle').checked = true;
-} else {
-    document.getElementById('themeToggle').checked = true; // dark = checked by default
-}
+const isDark = savedTheme !== 'light';
+document.getElementById('themeToggle').checked = isDark;
+if (!isDark) document.body.classList.add('light-mode');
 
 function toggleTheme(cb) {
-    const isDark = cb.checked;
-    document.body.classList.toggle('light-mode', !isDark);
-    localStorage.setItem('mindspace-theme', isDark ? 'dark' : 'light');
+    document.body.classList.toggle('light-mode', !cb.checked);
+    localStorage.setItem('mindspace-theme', cb.checked ? 'dark' : 'light');
 }
 </script>
 </body>
@@ -1353,7 +1224,7 @@ body::before { content: ''; position: fixed; inset: 0; background: radial-gradie
 .option-label.selected .option-dot::after { opacity: 1; transform: scale(1); }
 .option-text { color: rgba(255,255,255,0.75); font-size: 0.9rem; font-weight: 600; }
 .option-val { margin-left: auto; font-size: 1.1rem; }
-.btn-next { width: 100%; padding: 15px; border: none; border-radius: 14px; font-size: 1rem; font-weight: 800; font-family: 'Nunito', sans-serif; cursor: pointer; background: linear-gradient(135deg, #5bc8f5, #a78bfa); color: #fff; transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s; position: relative; overflow: hidden; }
+.btn-next { width: 100%; padding: 15px; border: none; border-radius: 14px; font-size: 1rem; font-weight: 800; font-family: 'Nunito', sans-serif; cursor: pointer; background: linear-gradient(135deg, #5bc8f5, #a78bfa); color: #fff; transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s; }
 .btn-next:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(92,200,245,0.3); }
 .btn-next:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 .result-wrap { display: none; animation: fadeInResult 0.6s cubic-bezier(0.16,1,0.3,1) both; }
@@ -1366,7 +1237,7 @@ body::before { content: ''; position: fixed; inset: 0; background: radial-gradie
 .btn-retake { width: 100%; padding: 13px; margin-top: 16px; border: 1.5px solid rgba(255,255,255,0.15); border-radius: 14px; background: transparent; color: rgba(255,255,255,0.7); font-family: 'Nunito', sans-serif; font-weight: 700; cursor: pointer; transition: all 0.2s; font-size: 0.9rem; }
 .btn-retake:hover { background: rgba(255,255,255,0.06); color: #fff; }
 .yt-float { position: fixed; bottom: 28px; right: 28px; z-index: 200; display: none; }
-.yt-float a { display: flex; align-items: center; gap: 10px; background: linear-gradient(135deg, #5bc8f5, #a78bfa); color: #fff; text-decoration: none; padding: 12px 20px 12px 14px; border-radius: 99px; font-weight: 800; font-size: 0.85rem; box-shadow: 0 8px 28px rgba(92,200,245,0.35); transition: transform 0.3s, box-shadow 0.3s; animation: pulse-glow 2.5s ease-in-out infinite; }
+.yt-float a { display: flex; align-items: center; gap: 10px; background: linear-gradient(135deg, #5bc8f5, #a78bfa); color: #fff; text-decoration: none; padding: 12px 20px 12px 14px; border-radius: 99px; font-weight: 800; font-size: 0.85rem; box-shadow: 0 8px 28px rgba(92,200,245,0.35); transition: transform 0.3s; animation: pulse-glow 2.5s ease-in-out infinite; }
 .yt-float a:hover { transform: translateY(-3px) scale(1.04); }
 @keyframes pulse-glow { 0%,100% { box-shadow: 0 8px 28px rgba(92,200,245,0.35); } 50% { box-shadow: 0 8px 40px rgba(167,139,250,0.55); } }
 .yt-icon { width: 32px; height: 32px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
@@ -1861,4 +1732,4 @@ def logout():
 # ---------------- RUN ----------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=False)  # FIX: debug=False stops auto-reload wiping sessions
