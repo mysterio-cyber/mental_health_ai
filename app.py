@@ -9,7 +9,7 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False
 
 # ── Anthropic API key (set via environment variable) ──────────────────────────
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn")
 
 def init_db():
     conn = sqlite3.connect("app.db")
