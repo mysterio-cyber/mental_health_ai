@@ -1086,7 +1086,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 <div class="chat-header">
     <div class="bot-avatar">🤖</div>
     <div>
-        <div class="bot-name">Sage — Your AI Companion{% if has_api %}<span class="ai-badge">✦ Claude AI</span>{% endif %}</div>
+        <div class="bot-name">TARA — Your AI Companion{% if has_api %}<span class="ai-badge">✦ Claude AI</span>{% endif %}</div>
         <div class="bot-status"><span class="status-dot"></span> Always here for you</div>
     </div>
     <div class="disclaimer">Not a substitute for professional therapy. For emergencies call iCall: 9152987821</div>
