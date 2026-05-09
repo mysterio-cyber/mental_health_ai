@@ -701,6 +701,10 @@ function newSudokuGame(){const pool=PUZZLES[difficulty];const base=pool[Math.flo
 initSudoku();
 
 // ====================== CHESS ======================
+
+<button onclick="toggleComputerMode()">
+Toggle Computer Mode
+</button>
 const PIECES={wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'};
 let board=[], turn='w', selected=null, validMoves=[], gameOver=false;
 let capturedWhite=[], capturedBlack=[];
@@ -817,8 +821,111 @@ function getNotation(p,from,to){const files='abcdefgh';const{r:fr,c:fc}=rc(from)
 
 function showPromotion(col){const modal=document.getElementById('promoModal');modal.classList.add('show');const choices=document.getElementById('promoChoices');choices.innerHTML='';['Q','R','B','N'].forEach(t=>{const btn=document.createElement('button');btn.className='promo-btn';btn.textContent=PIECES[col+t];btn.onclick=()=>{board[pendingPromotion.to]=col+t;pendingPromotion=null;modal.classList.remove('show');finishMove();};choices.appendChild(btn);});}
 
-function finishMove(){renderChess();updateChessUI();updateMoveHistory();}
 
+let playVsComputer = true;
+let computerColor = 'b';
+
+// Replace old finishMove() with this
+function finishMove(){
+
+    renderChess();
+
+    updateChessUI();
+
+    updateMoveHistory();
+
+    // Computer Turn
+    if(playVsComputer && turn === computerColor && !gameOver){
+
+        makeComputerMove();
+
+    }
+
+}
+
+// Computer AI Move
+function makeComputerMove(){
+
+    if(gameOver) return;
+
+    if(turn !== computerColor) return;
+
+    let allMoves = [];
+
+    for(let i = 0; i < 64; i++){
+
+        if(board[i] && color(board[i]) === computerColor){
+
+            const moves = getLegalMoves(i);
+
+            moves.forEach(move => {
+
+                allMoves.push({
+                    from: i,
+                    to: move,
+                    capture: board[move] ? 1 : 0
+                });
+
+            });
+
+        }
+
+    }
+
+    if(allMoves.length === 0) return;
+
+    // Prefer capture moves
+    allMoves.sort((a,b)=>b.capture-a.capture);
+
+    const bestMoves =
+        allMoves.filter(
+            m => m.capture === allMoves[0].capture
+        );
+
+    const randomMove =
+        bestMoves[
+            Math.floor(Math.random() * bestMoves.length)
+        ];
+
+    setTimeout(() => {
+
+        applyMove(randomMove.from, randomMove.to);
+
+        renderChess();
+
+        updateChessUI();
+
+        updateMoveHistory();
+
+    }, 500);
+
+}
+
+// Toggle Computer Mode
+function toggleComputerMode(){
+
+    playVsComputer = !playVsComputer;
+
+    alert(
+        playVsComputer
+        ? "Computer Mode Enabled"
+        : "Two Player Mode Enabled"
+    );
+
+}
+
+// Prevent clicking during AI turn
+const oldHandleChessClick = handleChessClick;
+
+handleChessClick = function(idx){
+
+    if(playVsComputer && turn === computerColor){
+        return;
+    }
+
+    oldHandleChessClick(idx);
+
+};
 function handleChessClick(idx){
     if(gameOver)return;
     if(selected!==null){
