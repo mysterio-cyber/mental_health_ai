@@ -3,18 +3,14 @@ import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 import os, json, datetime, random, urllib.request, urllib.error
 
-
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "mindspace-super-secret-key-change-in-prod-2024")
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False
 
-# ── OPEN AI API key (set via environment variable) ──────────────────────────
-from openai import OpenAI
+# ── Anthropic API key (set via environment variable) ──────────────────────────
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
-OPENAI_API_KEY = "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"
-
-client = OpenAI(api_key=OPENAI_API_KEY)
 def init_db():
     conn = sqlite3.connect("app.db")
     cur = conn.cursor()
