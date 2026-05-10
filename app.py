@@ -902,14 +902,19 @@ def api_emotion():
 # ─────────────────────────────────────────────
 # FEATURE 2 — AI CHATBOT THERAPIST (Claude-powered with fallback)
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# STEP 1: Add this line near the top of your file,
+#         right after your existing imports and app = Flask(__name__)
+#         Replace the string with your actual API key.
+# ─────────────────────────────────────────────
 
-import random
-import json
-import urllib.request
+ANTHROPIC_API_KEY = "sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn"   # ← paste your key here
+
 
 # ─────────────────────────────────────────────
-# RULE-BASED FALLBACK RESPONSES
+# STEP 2: Paste this entire block BEFORE your other routes
 # ─────────────────────────────────────────────
+
 THERAPIST_RESPONSES = {
     "greet": [
         "Hello 💙 I'm so glad you reached out. How are you feeling today?",
@@ -917,40 +922,40 @@ THERAPIST_RESPONSES = {
         "Welcome 🌙 I'm here to listen. How has your day been?"
     ],
     "stress": [
-        "I can hear that you're feeling stressed. That's completely valid. 💛 Let's try something together — take a slow deep breath in for 4 counts, hold for 4, exhale for 4. How does that feel?",
-        "Stress can feel so heavy. 😔 One thing that often helps is breaking tasks into tiny, manageable pieces. What's the one thing stressing you most right now?",
-        "You're carrying a lot. Remember — it's okay to not have everything figured out. 🌿 What's one small thing you could let go of today?"
+        "I can hear that you're feeling stressed. That's completely valid. 💛 Let's try something — take a slow deep breath in for 4 counts, hold for 4, exhale for 4. How does that feel?",
+        "Stress can feel so heavy. 😔 What's the one thing stressing you most right now?",
+        "You're carrying a lot. It's okay to not have everything figured out. 🌿 What's one small thing you could let go of today?"
     ],
     "anxiety": [
         "Anxiety can feel overwhelming, but you're not alone. 💙 Try grounding yourself: name 5 things you can see right now.",
-        "When anxiety peaks, our mind races ahead. 🌬️ Let's come back to the present — take three slow breaths with me. Inhale… exhale… You're safe.",
+        "When anxiety peaks, our mind races ahead. 🌬️ Take three slow breaths with me. Inhale… exhale… You're safe.",
         "Anxiety is your mind trying to protect you — even if it's misfiring. 💛 What specific worry is on your mind?"
     ],
     "sadness": [
         "I'm sorry you're feeling this way. 💙 Sadness is a natural part of being human. Would you like to talk about what's making you feel down?",
         "It's okay to feel sad. 🌧️ Sometimes we need to sit with our feelings before we can move through them.",
-        "Your feelings are valid. 💛 Sometimes doing one small kind thing for yourself — a warm drink, a short walk, a favourite song — can gently lift the weight."
+        "Your feelings are valid. 💛 Sometimes one small kind thing for yourself — a warm drink, a short walk — can gently lift the weight."
     ],
     "anger": [
         "Anger is a signal that something important to you has been threatened. 🔥 It's okay to feel it. What happened?",
         "When we're angry, our body is in fight mode. 💨 Try this: take 10 slow breaths, or write out everything you want to say.",
-        "Anger is valid. 💙 Once you've had a moment to cool down, it can help to ask: what do I actually need right now?"
+        "Anger is valid. 💙 Once you've had a moment to cool down, ask: what do I actually need right now?"
     ],
     "happiness": [
         "That's wonderful! 😊✨ Savour this feeling — what made today good?",
-        "I love hearing that! 🌟 Positive moments are worth celebrating. What brought you joy today?",
-        "Amazing! 🎉 Gratitude helps us feel more of this — what are three things you're grateful for right now?"
+        "I love hearing that! 🌟 What brought you joy today?",
+        "Amazing! 🎉 What are three things you're grateful for right now?"
     ],
     "sleep": [
-        "Poor sleep can affect everything else. 😴 A few tips: keep a consistent bedtime, avoid screens 30 mins before bed, and try the 4-7-8 breathing technique.",
+        "Poor sleep affects everything. 😴 Try: consistent bedtime, no screens 30 mins before bed, and the 4-7-8 breathing technique.",
         "Sleep struggles are so common. 🌙 Have you tried a bedtime routine? Even 20 mins of winding down can help.",
     ],
     "help": [
-        "You've taken a brave first step by asking for help. 💙 I can chat with you, share coping strategies, or just listen. What would help most right now?",
+        "You've taken a brave first step. 💙 I can chat, share coping strategies, or just listen. What would help most right now?",
         "Asking for help is a sign of strength, not weakness. 🌿 I'm here. What's going on?",
     ],
     "crisis": [
-        "I hear you, and what you're feeling matters deeply. 💙 Please reach out to a crisis helpline — in India: iCall: 9152987821 | Vandrevala Foundation: 1860-2662-345 (24/7). You deserve real human support.",
+        "I hear you, and what you're feeling matters deeply. 💙 Please reach out — iCall: 9152987821 | Vandrevala Foundation: 1860-2662-345 (24/7). You deserve real human support.",
     ],
     "default": [
         "I hear you. 💙 Would you like to tell me more about how you're feeling?",
@@ -962,17 +967,17 @@ THERAPIST_RESPONSES = {
 }
 
 
-def rule_based_reply(user_msg: str) -> str:
+def rule_based_reply(user_msg):
     msg = user_msg.lower()
-    crisis_words = ["suicide", "kill myself", "end my life", "self harm", "hurt myself",
-                    "want to die", "can't go on", "no reason to live"]
+    crisis_words = ["suicide", "kill myself", "end my life", "self harm",
+                    "hurt myself", "want to die", "can't go on", "no reason to live"]
     if any(w in msg for w in crisis_words):
         return random.choice(THERAPIST_RESPONSES["crisis"])
-    if any(w in msg for w in ["hello", "hi ", "hey ", "good morning", "good evening", "howdy", "sup "]):
+    if any(w in msg for w in ["hello", "hi ", "hey ", "good morning", "good evening"]):
         return random.choice(THERAPIST_RESPONSES["greet"])
-    if any(w in msg for w in ["help", "support", "dont know", "don't know", "lost", "confused", "what do i do"]):
+    if any(w in msg for w in ["help", "support", "dont know", "don't know", "lost", "confused"]):
         return random.choice(THERAPIST_RESPONSES["help"])
-    if any(w in msg for w in ["stress", "overwhelm", "pressure", "too much", "can't cope", "cant cope"]):
+    if any(w in msg for w in ["stress", "overwhelm", "pressure", "too much", "cant cope", "can't cope"]):
         return random.choice(THERAPIST_RESPONSES["stress"])
     if any(w in msg for w in ["anxious", "anxiety", "panic", "fear", "worried", "scared"]):
         return random.choice(THERAPIST_RESPONSES["anxiety"])
@@ -980,40 +985,30 @@ def rule_based_reply(user_msg: str) -> str:
         return random.choice(THERAPIST_RESPONSES["sadness"])
     if any(w in msg for w in ["angry", "anger", "furious", "rage", "frustrated", "irritated", "mad"]):
         return random.choice(THERAPIST_RESPONSES["anger"])
-    if any(w in msg for w in ["happy", "great", "amazing", "wonderful", "excited", "joy", "good", "fantastic"]):
+    if any(w in msg for w in ["happy", "great", "amazing", "wonderful", "excited", "joy", "fantastic"]):
         return random.choice(THERAPIST_RESPONSES["happiness"])
     if any(w in msg for w in ["sleep", "insomnia", "tired", "fatigue", "rest", "awake", "cant sleep"]):
         return random.choice(THERAPIST_RESPONSES["sleep"])
     return random.choice(THERAPIST_RESPONSES["default"])
 
 
-def claude_chat_reply(messages_history: list, user_msg: str, api_key: str = None) -> str:
-    """Call Claude API for intelligent therapy responses."""
-    # FIX 1: Pass api_key as parameter instead of relying on global
-    if not api_key:
+def claude_chat_reply(messages_history, user_msg):
+    if not ANTHROPIC_API_KEY:
         return rule_based_reply(user_msg)
 
-    system_prompt = """You are Sage, a compassionate AI mental wellness companion built into MindSpace — a wellness app. Your role is to:
+    system_prompt = """You are TARA, a compassionate AI mental wellness companion built into MindSpace.
 - Listen with empathy and without judgment
 - Provide evidence-based coping strategies (CBT, mindfulness, breathing exercises)
-- Give emotional support for stress, anxiety, sadness, anger, and loneliness
-- Gently encourage users to seek professional help when needed
-- Keep responses warm, concise (2–4 sentences), and conversational — use emojis sparingly but naturally
+- Keep responses warm, concise (2-4 sentences), and conversational — use emojis sparingly
 - NEVER diagnose, prescribe, or replace professional therapy
-- If someone expresses suicidal ideation, immediately provide Indian crisis helplines: iCall 9152987821, Vandrevala Foundation 1860-2662-345
-- Always respond in first person as Sage
+- If someone expresses suicidal ideation, immediately provide: iCall 9152987821, Vandrevala Foundation 1860-2662-345
+- Always respond in first person as TARA"""
 
-Important: Keep responses short and supportive, not lecture-like."""
-
-    # FIX 2: Correctly build API messages — only include role:user and role:assistant
-    # Strip out any messages with unexpected roles
     api_messages = []
     for m in messages_history[-6:]:
         if m.get("role") in ("user", "assistant") and m.get("content", "").strip():
             api_messages.append({"role": m["role"], "content": m["content"]})
 
-    # FIX 3: Only append user message if not already last in history
-    # (prevents double-sending on quick replies)
     if not api_messages or api_messages[-1]["content"] != user_msg:
         api_messages.append({"role": "user", "content": user_msg})
 
@@ -1030,38 +1025,35 @@ Important: Keep responses short and supportive, not lecture-like."""
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "x-api-key": api_key,
+                "x-api-key": ANTHROPIC_API_KEY,
                 "anthropic-version": "2023-06-01"
             },
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             return result["content"][0]["text"]
     except Exception as e:
-        print(f"Claude API error: {e}")   # FIX 4: Log the actual error for debugging
+        print(f"Claude API error: {e}")
         return rule_based_reply(user_msg)
 
 
-# ─────────────────────────────────────────────
-# CHAT PAGE HTML TEMPLATE (drop-in replacement)
-# ─────────────────────────────────────────────
 CHAT_PAGE_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MindSpace — AI Therapist</title>
+<title>MindSpace — TARA</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'Nunito',sans-serif;height:100vh;background:#0d0d1a;color:#fff;display:flex;flex-direction:column;overflow:hidden;position:relative;}
+body{font-family:'Nunito',sans-serif;height:100vh;background:#0d0d1a;color:#fff;display:flex;flex-direction:column;overflow:hidden;}
 body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 20% 40%,rgba(99,102,241,0.08) 0%,transparent 60%),radial-gradient(ellipse 60% 80% at 80% 20%,rgba(167,139,250,0.08) 0%,transparent 60%);pointer-events:none;z-index:0;}
-.topnav{position:relative;z-index:10;display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:rgba(13,13,26,0.95);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,0.07);flex-shrink:0;}
+.topnav{z-index:10;display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:rgba(13,13,26,0.95);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,0.07);flex-shrink:0;}
 .brand{font-family:'Playfair Display',serif;font-size:1.2rem;color:#fff;}
 .nav-links a{color:rgba(255,255,255,0.5);text-decoration:none;font-size:0.82rem;font-weight:700;margin-left:12px;padding:6px 14px;border-radius:20px;border:1px solid rgba(255,255,255,0.1);transition:all 0.2s;}
 .nav-links a:hover{color:#fff;background:rgba(255,255,255,0.08);}
-.chat-header{position:relative;z-index:5;display:flex;align-items:center;gap:14px;padding:16px 24px;background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.06);flex-shrink:0;}
+.chat-header{z-index:5;display:flex;align-items:center;gap:14px;padding:16px 24px;background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.06);flex-shrink:0;}
 .bot-avatar{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;box-shadow:0 0 20px rgba(99,102,241,0.4);}
 .bot-name{font-weight:800;font-size:1rem;}
 .bot-status{font-size:0.75rem;color:rgba(255,255,255,0.4);display:flex;align-items:center;gap:6px;}
@@ -1089,214 +1081,157 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .quick-replies{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 10px;position:relative;z-index:2;}
 .qr-btn{padding:7px 14px;border:1px solid rgba(255,255,255,0.12);border-radius:99px;background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.6);font-family:'Nunito',sans-serif;font-size:0.78rem;font-weight:700;cursor:pointer;transition:all 0.2s;white-space:nowrap;}
 .qr-btn:hover{background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.4);color:#fff;}
-.input-row{position:relative;z-index:5;display:flex;gap:10px;padding:14px 20px 20px;background:rgba(13,13,26,0.9);border-top:1px solid rgba(255,255,255,0.06);flex-shrink:0;}
+.input-row{z-index:5;display:flex;gap:10px;padding:14px 20px 20px;background:rgba(13,13,26,0.9);border-top:1px solid rgba(255,255,255,0.06);flex-shrink:0;}
 .chat-input{flex:1;padding:13px 18px;background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.1);border-radius:99px;color:#fff;font-family:'Nunito',sans-serif;font-size:0.92rem;outline:none;transition:border-color 0.3s;}
 .chat-input:focus{border-color:rgba(99,102,241,0.5);}
 .chat-input::placeholder{color:rgba(255,255,255,0.3);}
 .send-btn{width:46px;height:46px;border-radius:50%;border:none;background:linear-gradient(135deg,#6366f1,#a78bfa);color:#fff;font-size:1.2rem;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
 .send-btn:hover{transform:scale(1.1);box-shadow:0 4px 16px rgba(99,102,241,0.4);}
-/* FIX 5: Disable send button while waiting for response */
 .send-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
 </style>
 </head>
 <body>
-<nav class="topnav"><span class="brand">MindSpace 🌿</span><div class="nav-links"><a href="/">🏠 Home</a><a href="/emotion">🔍 Emotions</a><a href="/logout">👋 Logout</a></div></nav>
+<nav class="topnav">
+  <span class="brand">MindSpace 🌿</span>
+  <div class="nav-links">
+    <a href="/">🏠 Home</a>
+    <a href="/emotion">🔍 Emotions</a>
+    <a href="/logout">👋 Logout</a>
+  </div>
+</nav>
 <div class="chat-header">
-    <div class="bot-avatar">🤖</div>
-    <div>
-        <div class="bot-name">TARA — Your AI Companion{% if has_api %}<span class="ai-badge">✦ Claude AI</span>{% endif %}</div>
-        <div class="bot-status"><span class="status-dot"></span> Always here for you</div>
+  <div class="bot-avatar">🤖</div>
+  <div>
+    <div class="bot-name">TARA — Your AI Companion
+      {% if has_api %}<span class="ai-badge">✦ Claude AI</span>{% endif %}
     </div>
-    <div class="disclaimer">Not a substitute for professional therapy. For emergencies call iCall: 9152987821</div>
+    <div class="bot-status"><span class="status-dot"></span> Always here for you</div>
+  </div>
+  <div class="disclaimer">Not a substitute for professional therapy.<br>Emergencies: iCall 9152987821</div>
 </div>
 <div class="messages" id="messages"></div>
 <div class="quick-replies" id="quickReplies">
-    <button class="qr-btn" onclick="quickSend('I feel stressed today')">😓 I feel stressed</button>
-    <button class="qr-btn" onclick="quickSend('I have anxiety')">😰 I have anxiety</button>
-    <button class="qr-btn" onclick="quickSend('I feel sad and lonely')">😢 I feel sad</button>
-    <button class="qr-btn" onclick="quickSend('I am angry about something')">😠 I feel angry</button>
-    <button class="qr-btn" onclick="quickSend('I cannot sleep well')">😴 Sleep issues</button>
-    <button class="qr-btn" onclick="quickSend('I need some help')">🙏 I need help</button>
+  <button class="qr-btn" onclick="quickSend('I feel stressed today')">😓 I feel stressed</button>
+  <button class="qr-btn" onclick="quickSend('I have anxiety')">😰 I have anxiety</button>
+  <button class="qr-btn" onclick="quickSend('I feel sad and lonely')">😢 I feel sad</button>
+  <button class="qr-btn" onclick="quickSend('I am angry about something')">😠 I feel angry</button>
+  <button class="qr-btn" onclick="quickSend('I cannot sleep well')">😴 Sleep issues</button>
+  <button class="qr-btn" onclick="quickSend('I need some help')">🙏 I need help</button>
 </div>
 <div class="input-row">
-    <input class="chat-input" id="chatInput" placeholder="Share what's on your mind…" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendMsg();}">
-    <button class="send-btn" id="sendBtn" onclick="sendMsg()">➤</button>
+  <input class="chat-input" id="chatInput" placeholder="Share what's on your mind…"
+         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg();}">
+  <button class="send-btn" id="sendBtn" onclick="sendMsg()">➤</button>
 </div>
 <script>
 const messagesEl = document.getElementById('messages');
-const sendBtn = document.getElementById('sendBtn');
-const chatInput = document.getElementById('chatInput');
-
-// FIX 6: Keep history as a proper array, never include the initial greeting
-let chatHistory = [];
-let isSending = false;  // FIX 7: Guard against double-sends
+const sendBtn    = document.getElementById('sendBtn');
+const chatInput  = document.getElementById('chatInput');
+let chatHistory  = [];
+let isSending    = false;
 
 function nowTime() {
-    const d = new Date();
-    return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  const d = new Date();
+  return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
 }
 
-// FIX 8: Escape HTML to prevent XSS from API responses
 function escapeHTML(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-              .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 }
 
 function addMsg(text, role, skipHistory) {
-    const div = document.createElement('div');
-    div.className = 'msg ' + role;
-    // Allow emojis but escape everything else
-    div.innerHTML = `<div class="bubble">${escapeHTML(text)}</div><div class="msg-time">${nowTime()}</div>`;
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-
-    // FIX 9: skipHistory flag so greeting doesn't pollute API context
-    if (!skipHistory) {
-        chatHistory.push({ role: role === 'bot' ? 'assistant' : 'user', content: text });
-    }
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.innerHTML = `<div class="bubble">${escapeHTML(text)}</div><div class="msg-time">${nowTime()}</div>`;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (!skipHistory) {
+    chatHistory.push({ role: role === 'bot' ? 'assistant' : 'user', content: text });
+  }
 }
 
 function showTyping() {
-    const div = document.createElement('div');
-    div.className = 'msg bot';
-    div.id = 'typing';
-    div.innerHTML = `<div class="typing-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+  const div = document.createElement('div');
+  div.className = 'msg bot'; div.id = 'typing';
+  div.innerHTML = `<div class="typing-bubble">
+    <div class="typing-dot"></div>
+    <div class="typing-dot"></div>
+    <div class="typing-dot"></div>
+  </div>`;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 function removeTyping() {
-    const t = document.getElementById('typing');
-    if (t) t.remove();
+  const t = document.getElementById('typing');
+  if (t) t.remove();
 }
 
 async function sendMsg() {
-    // FIX 10: Prevent double sends
-    if (isSending) return;
-    const text = chatInput.value.trim();
-    if (!text) return;
+  if (isSending) return;
+  const text = chatInput.value.trim();
+  if (!text) return;
 
-    isSending = true;
-    sendBtn.disabled = true;
-    chatInput.value = '';
+  isSending = true;
+  sendBtn.disabled = true;
+  chatInput.value = '';
+  document.getElementById('quickReplies').style.display = 'none';
 
-    // Hide quick replies after first use
-    document.getElementById('quickReplies').style.display = 'none';
+  addMsg(text, 'user');
+  showTyping();
 
-    addMsg(text, 'user');
-    showTyping();
-
-    try {
-        // FIX 11: Send only last 10 messages (exclude greeting via skipHistory)
-        const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text, history: chatHistory.slice(-10) })
-        });
-
-        if (!res.ok) {
-            throw new Error('Server returned ' + res.status);
-        }
-
-        const d = await res.json();
-        removeTyping();
-
-        if (d.reply) {
-            addMsg(d.reply, 'bot');
-        } else if (d.error) {
-            addMsg('Something went wrong. Please try again.', 'bot');
-        }
-    } catch (err) {
-        removeTyping();
-        console.error('Chat error:', err);
-        addMsg('Sorry, I had trouble connecting. Please try again. 💙', 'bot');
-    } finally {
-        isSending = false;
-        sendBtn.disabled = false;
-        chatInput.focus();
-    }
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, history: chatHistory.slice(-10) })
+    });
+    if (!res.ok) throw new Error('Server error ' + res.status);
+    const d = await res.json();
+    removeTyping();
+    addMsg(d.reply || 'Something went wrong. Please try again.', 'bot');
+  } catch (err) {
+    removeTyping();
+    console.error('Chat error:', err);
+    addMsg('Sorry, I had trouble connecting. Please try again. 💙', 'bot');
+  } finally {
+    isSending = false;
+    sendBtn.disabled = false;
+    chatInput.focus();
+  }
 }
 
-// FIX 12: quickSend now just sets input and calls sendMsg (no duplication)
 function quickSend(text) {
-    chatInput.value = text;
-    sendMsg();
+  chatInput.value = text;
+  sendMsg();
 }
 
-// FIX 13: Greeting shown with skipHistory=true so it doesn't appear in API context
+// Greeting — skipHistory=true so it won't be sent to the API
 setTimeout(() => {
-    addMsg('Hello {{ session["user"] }} 💙 I\'m TARA, your calm AI companion. This is a safe, judgement-free space. How are you feeling today?', 'bot', true);
+  addMsg('Hello {{ username }} 💙 I\'m TARA, your calm AI companion. This is a safe, judgement-free space. How are you feeling today?', 'bot', true);
 }, 400);
 </script>
-</body></html>
+</body>
+</html>
 """
 
+
 # ─────────────────────────────────────────────
-# FLASK ROUTES — replace your existing /chat and /api/chat
+# STEP 3: These are the two routes — paste them
+#         AFTER all your existing routes
 # ─────────────────────────────────────────────
-
-# In your Flask app, replace the /chat and /api/chat routes with these:
-"""
-from flask import Flask, render_template_string, request, jsonify, session, redirect
-import os
-
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
-ANTHROPIC_API_KEY = "'sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn'"
-
-
 
 @app.route("/chat")
 def chat_page():
     if "user" not in session:
         return redirect("/login")
     has_api = bool(ANTHROPIC_API_KEY)
-    return render_template_string(CHAT_PAGE_TEMPLATE, has_api=has_api)
+    return render_template_string(CHAT_PAGE_TEMPLATE,
+                                  has_api=has_api,
+                                  username=session["user"])
 
-
-@app.route("/api/chat", methods=["POST"])
-def api_chat():
-    if "user" not in session:
-        return jsonify({"error": "Not logged in"}), 401
-
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    msg = data.get("message", "").strip()
-    if not msg:
-        return jsonify({"error": "Empty message"}), 400
-
-    history = data.get("history", [])
-
-    # FIX: Pass API key explicitly, not via global
-    reply = claude_chat_reply(history, msg, api_key=ANTHROPIC_API_KEY)
-    return jsonify({"reply": reply})
-"""  
-
-from flask import Flask, render_template_string, request, jsonify, session, redirect
-import os
-import random
-import json
-import urllib.request
-
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
-
-# Store your key in an environment variable, NOT hardcoded:
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-
-# ... paste THERAPIST_RESPONSES dict here ...
-# ... paste rule_based_reply() here ...
-# ... paste claude_chat_reply() here ...
-# ... paste CHAT_PAGE_TEMPLATE here ...
-
-@app.route("/chat")
-def chat_page():
-    if "user" not in session:
-        return redirect("/login")
-    has_api = bool(ANTHROPIC_API_KEY)
-    return render_template_string(CHAT_PAGE_TEMPLATE, has_api=has_api)
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
@@ -1309,12 +1244,16 @@ def api_chat():
     if not msg:
         return jsonify({"error": "Empty message"}), 400
     history = data.get("history", [])
-    reply = claude_chat_reply(history, msg, api_key=ANTHROPIC_API_KEY)
+    reply = claude_chat_reply(history, msg)
     return jsonify({"reply": reply})
+
+
+# ─────────────────────────────────────────────
+# STEP 4: Make sure this is at the very BOTTOM of your file
+# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     app.run(debug=True)
-
 # ─────────────────────────────────────────────
 # FEATURE 3 — MOOD TRACKER
 # ─────────────────────────────────────────────
