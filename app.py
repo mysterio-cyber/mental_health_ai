@@ -1626,14 +1626,186 @@ function switchTab(tab,btn){document.querySelectorAll('.tab-btn').forEach(b=>b.c
 # PUZZLE PAGE (kept intact)
 # ─────────────────────────────────────────────
 
-@app.route("/puzzle")
+app.route("/puzzle")
 def puzzle():
     if "user" not in session:
         return redirect("/login")
-    # (Full puzzle page — same as original, abbreviated here for clarity)
-    
-    return redirect("/games")  # redirect to games if user hits /puzzle directly
+    return render_template_string("""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MindSpace — Brain Puzzles</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Nunito',sans-serif;min-height:100vh;background:#0d0d1a;color:#fff;padding:90px 16px 40px;position:relative;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 20% 40%,rgba(249,168,212,0.08) 0%,transparent 60%),radial-gradient(ellipse 60% 80% at 80% 20%,rgba(167,139,250,0.08) 0%,transparent 60%);pointer-events:none;}
+.topnav{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:rgba(13,13,26,0.85);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,0.07);z-index:100;}
+.brand{font-family:'Playfair Display',serif;font-size:1.2rem;color:#fff;}
+.nav-links a{color:rgba(255,255,255,0.5);text-decoration:none;font-size:0.82rem;font-weight:700;margin-left:12px;padding:6px 14px;border-radius:20px;border:1px solid rgba(255,255,255,0.1);transition:all 0.2s;}
+.nav-links a:hover{color:#fff;background:rgba(255,255,255,0.08);}
+.page-wrap{position:relative;z-index:1;max-width:680px;margin:0 auto;}
+.page-title{font-family:'Playfair Display',serif;font-size:1.8rem;margin-bottom:4px;}
+.page-sub{color:rgba(255,255,255,0.4);font-size:0.85rem;margin-bottom:24px;}
+.game-tabs{display:flex;gap:8px;margin-bottom:24px;background:rgba(255,255,255,0.04);padding:6px;border-radius:16px;border:1px solid rgba(255,255,255,0.08);}
+.tab-btn{flex:1;padding:9px;border:none;border-radius:12px;font-family:'Nunito',sans-serif;font-weight:800;font-size:0.82rem;cursor:pointer;transition:all 0.25s;background:transparent;color:rgba(255,255,255,0.4);}
+.tab-btn.active{background:linear-gradient(135deg,#f9a8d4,#a78bfa);color:#fff;box-shadow:0 4px 16px rgba(249,168,212,0.3);}
+.game-panel{display:none;}.game-panel.active{display:block;}
+.game-btn{padding:10px 20px;border:none;border-radius:12px;font-family:'Nunito',sans-serif;font-weight:800;font-size:0.85rem;cursor:pointer;transition:all 0.2s;}
+.game-btn.primary{background:linear-gradient(135deg,#f9a8d4,#a78bfa);color:#fff;}
+.game-btn.secondary{background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);}
+.game-btn:hover{transform:translateY(-2px);}
+/* MEMORY */
+.memory-info{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+.memory-stat{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:8px 16px;font-weight:800;font-size:0.88rem;}
+.memory-grid{display:grid;gap:10px;margin-bottom:16px;}
+.mem-card{aspect-ratio:1;background:rgba(249,168,212,0.1);border:2px solid rgba(249,168,212,0.2);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:2rem;cursor:pointer;transition:all 0.3s;transform:rotateY(0deg);user-select:none;}
+.mem-card.flipped,.mem-card.matched{background:rgba(249,168,212,0.2);border-color:rgba(249,168,212,0.5);box-shadow:0 0 16px rgba(249,168,212,0.3);}
+.mem-card.matched{background:rgba(110,231,183,0.15);border-color:rgba(110,231,183,0.4);cursor:default;}
+.mem-card:not(.flipped):not(.matched) span{opacity:0;}
+.mem-card:hover:not(.flipped):not(.matched){background:rgba(249,168,212,0.15);transform:scale(1.04);}
+.memory-actions{display:flex;gap:10px;align-items:center;}
 
+/* WORD SCRAMBLE */
+.word-wrap{text-align:center;}
+.scrambled-word{font-size:3rem;font-weight:900;letter-spacing:8px;color:#f9a8d4;margin:24px 0;text-shadow:0 0 20px rgba(249,168,212,0.4);font-family:'Playfair Display',serif;}
+.word-input-row{display:flex;gap:10px;justify-content:center;margin-bottom:16px;}
+.word-input{padding:12px 20px;background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.12);border-radius:14px;color:#fff;font-size:1.1rem;font-weight:800;font-family:'Nunito',sans-serif;outline:none;text-align:center;text-transform:uppercase;width:200px;letter-spacing:4px;}
+.word-input:focus{border-color:rgba(249,168,212,0.6);}
+.word-hint{color:rgba(255,255,255,0.4);font-size:0.82rem;margin-bottom:12px;}
+.word-result{font-size:1.1rem;font-weight:800;min-height:28px;margin-bottom:12px;}
+.word-score{display:flex;gap:16px;justify-content:center;margin-bottom:20px;}
+.word-score-item{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:8px 16px;font-weight:800;font-size:0.88rem;}
+.word-timer{font-size:2rem;font-weight:900;text-align:center;margin-bottom:8px;color:#a78bfa;}
+
+/* 2048 */
+.g2048-wrap{display:flex;flex-direction:column;align-items:center;}
+.g2048-info{display:flex;justify-content:space-between;width:100%;max-width:340px;margin-bottom:14px;}
+.g2048-score{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:8px 20px;font-weight:800;text-align:center;}
+.g2048-score .label{font-size:0.7rem;color:rgba(255,255,255,0.4);text-transform:uppercase;}
+.g2048-score .val{font-size:1.3rem;color:#f9a8d4;}
+.g2048-board{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;background:rgba(255,255,255,0.06);border-radius:16px;padding:10px;max-width:340px;width:100%;}
+.g2048-cell{aspect-ratio:1;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:900;transition:all 0.12s;}
+.g2048-actions{display:flex;gap:10px;margin-top:14px;}
+.g2048-instructions{color:rgba(255,255,255,0.3);font-size:0.78rem;margin-top:10px;text-align:center;}
+</style>
+</head>
+<body>
+<nav class="topnav"><span class="brand">MindSpace 🌿</span><div class="nav-links"><a href="/">🏠 Home</a><a href="/logout">👋 Logout</a></div></nav>
+<div class="page-wrap">
+    <h1 class="page-title">🧩 Brain Puzzles</h1>
+    <p class="page-sub">Train your memory, vocabulary, and strategic thinking</p>
+    <div class="game-tabs">
+        <button class="tab-btn active" onclick="switchTab('memory',this)">🃏 Memory Match</button>
+        <button class="tab-btn" onclick="switchTab('word',this)">🔤 Word Scramble</button>
+        <button class="tab-btn" onclick="switchTab('g2048',this)">🔢 2048</button>
+    </div>
+
+    <!-- MEMORY MATCH -->
+    <div class="game-panel active" id="panel-memory">
+        <div class="memory-info">
+            <div class="memory-stat" id="memMoves">Moves: 0</div>
+            <div class="memory-stat" id="memPairs">Pairs: 0/8</div>
+            <div class="memory-stat" id="memTimer">⏱ 0s</div>
+            <div style="display:flex;gap:8px;">
+                <button class="game-btn secondary" onclick="setMemDiff(4,this)" style="font-size:0.75rem;padding:7px 12px;">4×4</button>
+                <button class="game-btn secondary" onclick="setMemDiff(6,this)" style="font-size:0.75rem;padding:7px 12px;">6×4</button>
+            </div>
+        </div>
+        <div class="memory-grid" id="memGrid"></div>
+        <div class="memory-actions">
+            <button class="game-btn primary" onclick="newMemGame()">🔄 New Game</button>
+        </div>
+    </div>
+
+    <!-- WORD SCRAMBLE -->
+    <div class="game-panel" id="panel-word">
+        <div class="word-wrap">
+            <div class="word-score">
+                <div class="word-score-item">Score: <span id="wordScore" style="color:#f9a8d4;">0</span></div>
+                <div class="word-score-item">Streak: <span id="wordStreak" style="color:#6ee7b7;">0</span> 🔥</div>
+            </div>
+            <div class="word-timer" id="wordTimer">⏱ 30</div>
+            <div class="word-hint" id="wordHint"></div>
+            <div class="scrambled-word" id="scrambledWord"></div>
+            <div class="word-input-row">
+                <input class="word-input" id="wordInput" maxlength="12" placeholder="GUESS" onkeydown="if(event.key==='Enter')checkWord()">
+                <button class="game-btn primary" onclick="checkWord()">→</button>
+            </div>
+            <div class="word-result" id="wordResult"></div>
+            <div style="display:flex;gap:10px;justify-content:center;">
+                <button class="game-btn secondary" onclick="skipWord()">⏭ Skip</button>
+                <button class="game-btn secondary" onclick="showHint()">💡 Hint</button>
+                <button class="game-btn primary" onclick="startWordGame()">🔄 New Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2048 -->
+    <div class="game-panel" id="panel-g2048">
+        <div class="g2048-wrap">
+            <div class="g2048-info">
+                <div class="g2048-score"><div class="label">Score</div><div class="val" id="s2048">0</div></div>
+                <div class="g2048-score"><div class="label">Best</div><div class="val" id="b2048">0</div></div>
+            </div>
+            <div class="g2048-board" id="board2048"></div>
+            <div class="g2048-actions">
+                <button class="game-btn primary" onclick="new2048()">🔄 New Game</button>
+            </div>
+            <div class="g2048-instructions">Use arrow keys or swipe to merge tiles. Reach 2048!</div>
+        </div>
+    </div>
+</div>
+
+<script>
+function switchTab(tab,btn){document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.game-panel').forEach(p=>p.classList.remove('active'));btn.classList.add('active');document.getElementById('panel-'+tab).classList.add('active');}
+
+// ===== MEMORY MATCH =====
+const EMOJIS=['🌸','🌊','🌙','⭐','🦋','🌈','🔮','🌺','🎯','🦄','🍀','🎸'];
+let memCards=[],memFlipped=[],memMatched=0,memMoveCount=0,memTimer2=0,memInterval=null,memGridSize=4,memLock=false;
+function setMemDiff(cols,btn){memGridSize=cols;newMemGame();}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+function newMemGame(){const pairs=memGridSize===6?12:8;const chosen=EMOJIS.slice(0,pairs);memCards=shuffle([...chosen,...chosen]);memFlipped=[];memMatched=0;memMoveCount=0;memLock=false;clearInterval(memInterval);memTimer2=0;document.getElementById('memMoves').textContent='Moves: 0';document.getElementById('memPairs').textContent=`Pairs: 0/${pairs}`;document.getElementById('memTimer').textContent='⏱ 0s';memInterval=setInterval(()=>{memTimer2++;document.getElementById('memTimer').textContent=`⏱ ${memTimer2}s`;},1000);renderMem();}
+function renderMem(){const grid=document.getElementById('memGrid');const cols=memGridSize;grid.style.gridTemplateColumns=`repeat(${cols},1fr)`;grid.innerHTML='';memCards.forEach((e,i)=>{const card=document.createElement('div');card.className='mem-card';if(memFlipped.includes(i)||memCards[i]==='matched')card.classList.add('flipped');if(memCards[i]==='matched')card.classList.add('matched');card.innerHTML=`<span>${e}</span>`;card.onclick=()=>flipCard(i);grid.appendChild(card);});}
+function flipCard(i){if(memLock||memFlipped.includes(i)||memCards[i]==='matched')return;memFlipped.push(i);renderMem();if(memFlipped.length===2){memMoveCount++;document.getElementById('memMoves').textContent=`Moves: ${memMoveCount}`;const[a,b]=memFlipped;if(memCards[a]===memCards[b]){memCards[a]=memCards[b]='matched';memMatched++;const pairs=memCards.filter(c=>c==='matched').length/2;document.getElementById('memPairs').textContent=`Pairs: ${pairs}/${memCards.filter(c=>c!=='matched').length/2+pairs}`;memFlipped=[];renderMem();if(pairs===memCards.length/2){clearInterval(memInterval);setTimeout(()=>alert(`🎉 You won in ${memMoveCount} moves and ${memTimer2}s!`),300);}}else{memLock=true;setTimeout(()=>{memFlipped=[];memLock=false;renderMem();},900);}}}
+newMemGame();
+
+// ===== WORD SCRAMBLE =====
+const WORDS=[{w:'HAPPY',h:'Feeling joyful'},{w:'CALM',h:'Peaceful state'},{w:'BREATHE',h:'Inhale and exhale'},{w:'MINDFUL',h:'Being present'},{w:'BALANCE',h:'Equilibrium'},{w:'SERENE',h:'Tranquil and calm'},{w:'FOCUS',h:'Concentrate'},{w:'ENERGY',h:'Vitality'},{w:'PEACE',h:'Inner harmony'},{w:'STRENGTH',h:'Physical or mental power'},{w:'YOGA',h:'Mind-body practice'},{w:'RELAX',h:'Ease tension'},{w:'HEALTH',h:'State of well-being'},{w:'SLEEP',h:'Rest and recovery'},{w:'WATER',h:'Essential hydration'},{w:'SMILE',h:'Facial expression of happiness'},{w:'GRATITUDE',h:'Feeling thankful'},{w:'COURAGE',h:'Bravery'},{w:'WISDOM',h:'Deep understanding'},{w:'KINDNESS',h:'Being considerate'}];
+let wScore=0,wStreak=0,wIdx=0,wWordTimer=null,wTimeLeft=30,wCurrentWord='',wHintUsed=false,shuffledWords=[];
+function scramble(w){const a=w.split('');for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a.join('')===w&&w.length>1?scramble(w):a.join('');}
+function startWordGame(){shuffledWords=[...WORDS].sort(()=>Math.random()-0.5);wIdx=0;wScore=0;wStreak=0;document.getElementById('wordScore').textContent='0';document.getElementById('wordStreak').textContent='0';loadWord();}
+function loadWord(){if(wIdx>=shuffledWords.length){wIdx=0;shuffledWords.sort(()=>Math.random()-0.5);}wCurrentWord=shuffledWords[wIdx].w;wHintUsed=false;document.getElementById('scrambledWord').textContent=scramble(wCurrentWord);document.getElementById('wordHint').textContent=`Hint: ${shuffledWords[wIdx].h} (${wCurrentWord.length} letters)`;document.getElementById('wordInput').value='';document.getElementById('wordResult').textContent='';document.getElementById('wordInput').focus();clearInterval(wWordTimer);wTimeLeft=30;document.getElementById('wordTimer').textContent=`⏱ ${wTimeLeft}`;document.getElementById('wordTimer').style.color='#a78bfa';wWordTimer=setInterval(()=>{wTimeLeft--;document.getElementById('wordTimer').textContent=`⏱ ${wTimeLeft}`;if(wTimeLeft<=10)document.getElementById('wordTimer').style.color='#ff9a9a';if(wTimeLeft<=0){clearInterval(wWordTimer);document.getElementById('wordResult').textContent=`⏰ Time's up! It was "${wCurrentWord}"`;document.getElementById('wordResult').style.color='#ff9a9a';wStreak=0;document.getElementById('wordStreak').textContent='0';setTimeout(()=>{wIdx++;loadWord();},1800);}},1000);}
+function checkWord(){const guess=document.getElementById('wordInput').value.trim().toUpperCase();if(!guess)return;if(guess===wCurrentWord){clearInterval(wWordTimer);const bonus=wHintUsed?5:10;const timeBonus=Math.floor(wTimeLeft/3);wScore+=bonus+timeBonus;wStreak++;document.getElementById('wordScore').textContent=wScore;document.getElementById('wordStreak').textContent=wStreak;document.getElementById('wordResult').textContent=`✅ Correct! +${bonus+timeBonus} pts`;document.getElementById('wordResult').style.color='#6ee7b7';setTimeout(()=>{wIdx++;loadWord();},1200);}else{document.getElementById('wordResult').textContent='❌ Try again!';document.getElementById('wordResult').style.color='#ff9a9a';document.getElementById('wordInput').value='';wStreak=0;document.getElementById('wordStreak').textContent='0';}}
+function skipWord(){clearInterval(wWordTimer);document.getElementById('wordResult').textContent=`⏭ Skipped — it was "${wCurrentWord}"`;document.getElementById('wordResult').style.color='#fde68a';wStreak=0;document.getElementById('wordStreak').textContent='0';setTimeout(()=>{wIdx++;loadWord();},1200);}
+function showHint(){if(!wHintUsed){wHintUsed=true;const half=wCurrentWord.slice(0,Math.ceil(wCurrentWord.length/2));document.getElementById('wordResult').textContent=`💡 Starts with: ${half}...`;document.getElementById('wordResult').style.color='#fde68a';}}
+startWordGame();
+
+// ===== 2048 =====
+let g2048=[], g2048Score=0, g2048Best=0;
+const COLORS={'2':'#776e65','4':'#776e65','8':'#f59563','16':'#f59563','32':'#f67c5f','64':'#f65e3b','128':'#edcf72','256':'#edcc61','512':'#edc850','1024':'#edc53f','2048':'#edc22e'};
+const BGCOLOR={'2':'#eee4da','4':'#ede0c8','8':'#f2b179','16':'#f59563','32':'#f67c5f','64':'#f65e3b','128':'#edcf72','256':'#edcc61','512':'#edc850','1024':'#edc53f','2048':'#edc22e'};
+function new2048(){g2048=Array(16).fill(0);g2048Score=0;addTile2048();addTile2048();render2048();}
+function addTile2048(){const empty=g2048.map((v,i)=>v===0?i:-1).filter(i=>i>=0);if(!empty.length)return;const idx=empty[Math.floor(Math.random()*empty.length)];g2048[idx]=Math.random()<0.9?2:4;}
+function render2048(){const b=document.getElementById('board2048');b.innerHTML='';g2048.forEach(v=>{const cell=document.createElement('div');cell.className='g2048-cell';const bg=v?BGCOLOR[v]||'#3d3a6e':'rgba(255,255,255,0.05)';const col=v>4?'#f9f6f2':'#776e65';cell.style.cssText=`background:${bg};color:${col};font-size:${v>=1000?'0.85rem':v>=100?'1rem':'1.2rem'}`;cell.textContent=v||'';b.appendChild(cell);});document.getElementById('s2048').textContent=g2048Score;document.getElementById('b2048').textContent=g2048Best=Math.max(g2048Best,g2048Score);}
+function slide2048(row){const r=row.filter(v=>v!==0);for(let i=0;i<r.length-1;i++){if(r[i]===r[i+1]){r[i]*=2;g2048Score+=r[i];r[i+1]=0;}}const out=r.filter(v=>v!==0);while(out.length<4)out.push(0);return out;}
+function move2048(dir){const prev=[...g2048];if(dir==='left'){for(let r=0;r<4;r++){const row=g2048.slice(r*4,r*4+4);const s=slide2048(row);for(let c=0;c<4;c++)g2048[r*4+c]=s[c];}}
+else if(dir==='right'){for(let r=0;r<4;r++){const row=g2048.slice(r*4,r*4+4).reverse();const s=slide2048(row).reverse();for(let c=0;c<4;c++)g2048[r*4+c]=s[c];}}
+else if(dir==='up'){for(let c=0;c<4;c++){const col=[g2048[c],g2048[4+c],g2048[8+c],g2048[12+c]];const s=slide2048(col);for(let r=0;r<4;r++)g2048[r*4+c]=s[r];}}
+else if(dir==='down'){for(let c=0;c<4;c++){const col=[g2048[12+c],g2048[8+c],g2048[4+c],g2048[c]];const s=slide2048(col).reverse();for(let r=0;r<4;r++)g2048[r*4+c]=s[r];}}
+if(prev.some((v,i)=>v!==g2048[i])){addTile2048();render2048();}
+if(g2048.includes(2048)){setTimeout(()=>alert('🎉 You reached 2048! Amazing!'),100);}}
+document.addEventListener('keydown',e=>{if(!document.getElementById('panel-g2048').classList.contains('active'))return;const map={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down'};if(map[e.key]){e.preventDefault();move2048(map[e.key]);}});
+// Touch swipe for 2048
+let tx=0,ty=0;
+document.getElementById('board2048').addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY;},{passive:true});
+document.getElementById('board2048').addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-tx,dy=e.changedTouches[0].clientY-ty;if(Math.abs(dx)>Math.abs(dy)){move2048(dx>0?'right':'left');}else{move2048(dy>0?'down':'up');}},{passive:true});
+new2048();
+</script>
+</body></html>
+""")
 # ─────────────────────────────────────────────
 # ACTIVITY PAGE (kept intact)
 # ─────────────────────────────────────────────
