@@ -1626,7 +1626,7 @@ function switchTab(tab,btn){document.querySelectorAll('.tab-btn').forEach(b=>b.c
 # PUZZLE PAGE (kept intact)
 # ─────────────────────────────────────────────
 
-app.route("/puzzle")
+@app.route("/puzzle")
 def puzzle():
     if "user" not in session:
         return redirect("/login")
