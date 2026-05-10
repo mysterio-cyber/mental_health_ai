@@ -11,8 +11,12 @@ app.config['SESSION_COOKIE_SECURE'] = False
 # ── Anthropic API key (set via environment variable) ──────────────────────────
 ANTHROPIC_API_KEY = "sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn"
 
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH  = os.path.join(BASE_DIR, "app.db")
+
 def init_db():
-    conn = sqlite3.connect("app.db")
+    conn = sqlite3.connect(DB_PATH)   # ← FIXED (always same location)
     cur = conn.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
