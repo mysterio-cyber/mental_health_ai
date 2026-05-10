@@ -1879,10 +1879,6 @@ buildWorkout();
 </script>
 </body></html>
 """)
-
-
-    return redirect("/games")  # redirect to games as placeholder
-
 # ─────────────────────────────────────────────
 # PROFILE
 # ─────────────────────────────────────────────
