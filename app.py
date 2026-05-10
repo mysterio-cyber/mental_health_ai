@@ -9,7 +9,7 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False
 
 # ── Anthropic API key (set via environment variable) ──────────────────────────
-ANTHROPIC_API_KEY = "'sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn'"
+ANTHROPIC_API_KEY = "sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn"
 
 def init_db():
     conn = sqlite3.connect("app.db")
@@ -902,19 +902,9 @@ def api_emotion():
 # ─────────────────────────────────────────────
 # FEATURE 2 — AI CHATBOT THERAPIST (Claude-powered with fallback)
 # ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# STEP 1: Add this line near the top of your file,
-#         right after your existing imports and app = Flask(__name__)
-#         Replace the string with your actual API key.
-# ─────────────────────────────────────────────
+# ════════════════════════════════════════════
 
-ANTHROPIC_API_KEY = "sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn"   # ← paste your key here
-
-
-# ─────────────────────────────────────────────
-# STEP 2: Paste this entire block BEFORE your other routes
-# ─────────────────────────────────────────────
-
+# ── 2. RESPONSE DICTIONARY ──────────────────
 THERAPIST_RESPONSES = {
     "greet": [
         "Hello 💙 I'm so glad you reached out. How are you feeling today?",
@@ -922,7 +912,7 @@ THERAPIST_RESPONSES = {
         "Welcome 🌙 I'm here to listen. How has your day been?"
     ],
     "stress": [
-        "I can hear that you're feeling stressed. That's completely valid. 💛 Let's try something — take a slow deep breath in for 4 counts, hold for 4, exhale for 4. How does that feel?",
+        "I can hear that you're feeling stressed. That's completely valid. 💛 Try this — breathe in for 4 counts, hold for 4, exhale for 4. How does that feel?",
         "Stress can feel so heavy. 😔 What's the one thing stressing you most right now?",
         "You're carrying a lot. It's okay to not have everything figured out. 🌿 What's one small thing you could let go of today?"
     ],
@@ -947,7 +937,7 @@ THERAPIST_RESPONSES = {
         "Amazing! 🎉 What are three things you're grateful for right now?"
     ],
     "sleep": [
-        "Poor sleep affects everything. 😴 Try: consistent bedtime, no screens 30 mins before bed, and the 4-7-8 breathing technique.",
+        "Poor sleep affects everything. 😴 Tips: consistent bedtime, no screens 30 mins before bed, try the 4-7-8 breathing technique.",
         "Sleep struggles are so common. 🌙 Have you tried a bedtime routine? Even 20 mins of winding down can help.",
     ],
     "help": [
@@ -967,6 +957,7 @@ THERAPIST_RESPONSES = {
 }
 
 
+# ── 3. RULE-BASED FALLBACK ──────────────────
 def rule_based_reply(user_msg):
     msg = user_msg.lower()
     crisis_words = ["suicide", "kill myself", "end my life", "self harm",
@@ -992,6 +983,7 @@ def rule_based_reply(user_msg):
     return random.choice(THERAPIST_RESPONSES["default"])
 
 
+# ── 4. CLAUDE API FUNCTION ──────────────────
 def claude_chat_reply(messages_history, user_msg):
     if not ANTHROPIC_API_KEY:
         return rule_based_reply(user_msg)
@@ -999,7 +991,7 @@ def claude_chat_reply(messages_history, user_msg):
     system_prompt = """You are TARA, a compassionate AI mental wellness companion built into MindSpace.
 - Listen with empathy and without judgment
 - Provide evidence-based coping strategies (CBT, mindfulness, breathing exercises)
-- Keep responses warm, concise (2-4 sentences), and conversational — use emojis sparingly
+- Keep responses warm, concise (2-4 sentences), conversational — use emojis sparingly
 - NEVER diagnose, prescribe, or replace professional therapy
 - If someone expresses suicidal ideation, immediately provide: iCall 9152987821, Vandrevala Foundation 1860-2662-345
 - Always respond in first person as TARA"""
@@ -1008,7 +1000,6 @@ def claude_chat_reply(messages_history, user_msg):
     for m in messages_history[-6:]:
         if m.get("role") in ("user", "assistant") and m.get("content", "").strip():
             api_messages.append({"role": m["role"], "content": m["content"]})
-
     if not api_messages or api_messages[-1]["content"] != user_msg:
         api_messages.append({"role": "user", "content": user_msg})
 
@@ -1038,11 +1029,13 @@ def claude_chat_reply(messages_history, user_msg):
         return rule_based_reply(user_msg)
 
 
+# ── 5. HTML TEMPLATE ────────────────────────
 CHAT_PAGE_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MindSpace — TARA</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
 <style>
@@ -1144,7 +1137,7 @@ function escapeHTML(str) {
 function addMsg(text, role, skipHistory) {
   const div = document.createElement('div');
   div.className = 'msg ' + role;
-  div.innerHTML = `<div class="bubble">${escapeHTML(text)}</div><div class="msg-time">${nowTime()}</div>`;
+  div.innerHTML = '<div class="bubble">' + escapeHTML(text) + '</div><div class="msg-time">' + nowTime() + '</div>';
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   if (!skipHistory) {
@@ -1154,12 +1147,9 @@ function addMsg(text, role, skipHistory) {
 
 function showTyping() {
   const div = document.createElement('div');
-  div.className = 'msg bot'; div.id = 'typing';
-  div.innerHTML = `<div class="typing-bubble">
-    <div class="typing-dot"></div>
-    <div class="typing-dot"></div>
-    <div class="typing-dot"></div>
-  </div>`;
+  div.className = 'msg bot';
+  div.id = 'typing';
+  div.innerHTML = '<div class="typing-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -1173,15 +1163,12 @@ async function sendMsg() {
   if (isSending) return;
   const text = chatInput.value.trim();
   if (!text) return;
-
   isSending = true;
   sendBtn.disabled = true;
   chatInput.value = '';
   document.getElementById('quickReplies').style.display = 'none';
-
   addMsg(text, 'user');
   showTyping();
-
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -1208,9 +1195,8 @@ function quickSend(text) {
   sendMsg();
 }
 
-// Greeting — skipHistory=true so it won't be sent to the API
-setTimeout(() => {
-  addMsg('Hello {{ username }} 💙 I\'m TARA, your calm AI companion. This is a safe, judgement-free space. How are you feeling today?', 'bot', true);
+setTimeout(function() {
+  addMsg('Hello {{ username }} 💙 I am TARA, your calm AI companion. This is a safe, judgement-free space. How are you feeling today?', 'bot', true);
 }, 400);
 </script>
 </body>
@@ -1218,11 +1204,7 @@ setTimeout(() => {
 """
 
 
-# ─────────────────────────────────────────────
-# STEP 3: These are the two routes — paste them
-#         AFTER all your existing routes
-# ─────────────────────────────────────────────
-
+# ── 6. ROUTES ───────────────────────────────
 @app.route("/chat")
 def chat_page():
     if "user" not in session:
@@ -1248,12 +1230,8 @@ def api_chat():
     return jsonify({"reply": reply})
 
 
-# ─────────────────────────────────────────────
-# STEP 4: Make sure this is at the very BOTTOM of your file
-# ─────────────────────────────────────────────
 
-if __name__ == "__main__":
-    app.run(debug=True)
+
 # ─────────────────────────────────────────────
 # FEATURE 3 — MOOD TRACKER
 # ─────────────────────────────────────────────
@@ -2687,3 +2665,5 @@ if __name__ == "__main__":
     print("  Running at: http://localhost:5000")
     print("=" * 55)
     app.run(debug=True, host="0.0.0.0", port=5000)
+if __name__ == "__main__":
+    app.run(debug=True)
