@@ -1231,13 +1231,11 @@ setTimeout(() => {
 </body></html>
 """
 
-
 # ─────────────────────────────────────────────
 # FLASK ROUTES — replace your existing /chat and /api/chat
 # ─────────────────────────────────────────────
 
 # In your Flask app, replace the /chat and /api/chat routes with these:
-
 """
 from flask import Flask, render_template_string, request, jsonify, session, redirect
 import os
@@ -1274,7 +1272,48 @@ def api_chat():
     # FIX: Pass API key explicitly, not via global
     reply = claude_chat_reply(history, msg, api_key=ANTHROPIC_API_KEY)
     return jsonify({"reply": reply})
-"""
+"""  
+
+from flask import Flask, render_template_string, request, jsonify, session, redirect
+import os
+import random
+import json
+import urllib.request
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
+
+# Store your key in an environment variable, NOT hardcoded:
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+# ... paste THERAPIST_RESPONSES dict here ...
+# ... paste rule_based_reply() here ...
+# ... paste claude_chat_reply() here ...
+# ... paste CHAT_PAGE_TEMPLATE here ...
+
+@app.route("/chat")
+def chat_page():
+    if "user" not in session:
+        return redirect("/login")
+    has_api = bool(ANTHROPIC_API_KEY)
+    return render_template_string(CHAT_PAGE_TEMPLATE, has_api=has_api)
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    if "user" not in session:
+        return jsonify({"error": "Not logged in"}), 401
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    msg = data.get("message", "").strip()
+    if not msg:
+        return jsonify({"error": "Empty message"}), 400
+    history = data.get("history", [])
+    reply = claude_chat_reply(history, msg, api_key=ANTHROPIC_API_KEY)
+    return jsonify({"reply": reply})
+
+if __name__ == "__main__":
+    app.run(debug=True)
 
 # ─────────────────────────────────────────────
 # FEATURE 3 — MOOD TRACKER
