@@ -1642,8 +1642,7 @@ def puzzle():
 def activity():
     if "user" not in session:
         return redirect("/login")
-        return render_template_string("""
-<!DOCTYPE html>
+    return render_template_string("""
 <html>
 <head>
 <meta charset="UTF-8">
