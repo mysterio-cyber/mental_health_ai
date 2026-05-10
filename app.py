@@ -1631,6 +1631,7 @@ def puzzle():
     if "user" not in session:
         return redirect("/login")
     # (Full puzzle page — same as original, abbreviated here for clarity)
+    
     return redirect("/games")  # redirect to games if user hits /puzzle directly
 
 # ─────────────────────────────────────────────
@@ -1641,6 +1642,245 @@ def puzzle():
 def activity():
     if "user" not in session:
         return redirect("/login")
+        return render_template_string("""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MindSpace — Physical Activity</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Nunito',sans-serif;min-height:100vh;background:#0d0d1a;color:#fff;padding:90px 16px 60px;position:relative;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 20% 40%,rgba(52,211,153,0.07) 0%,transparent 60%),radial-gradient(ellipse 60% 80% at 80% 20%,rgba(92,200,245,0.07) 0%,transparent 60%);pointer-events:none;}
+.topnav{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:rgba(13,13,26,0.85);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,0.07);z-index:100;}
+.brand{font-family:'Playfair Display',serif;font-size:1.2rem;color:#fff;}
+.nav-links a{color:rgba(255,255,255,0.5);text-decoration:none;font-size:0.82rem;font-weight:700;margin-left:12px;padding:6px 14px;border-radius:20px;border:1px solid rgba(255,255,255,0.1);transition:all 0.2s;}
+.nav-links a:hover{color:#fff;background:rgba(255,255,255,0.08);}
+.page-wrap{position:relative;z-index:1;max-width:760px;margin:0 auto;}
+.page-title{font-family:'Playfair Display',serif;font-size:1.8rem;margin-bottom:4px;}
+.page-sub{color:rgba(255,255,255,0.4);font-size:0.85rem;margin-bottom:24px;}
+.section-tabs{display:flex;gap:8px;margin-bottom:24px;background:rgba(255,255,255,0.04);padding:6px;border-radius:16px;border:1px solid rgba(255,255,255,0.08);overflow-x:auto;}
+.tab-btn{flex-shrink:0;padding:9px 16px;border:none;border-radius:12px;font-family:'Nunito',sans-serif;font-weight:800;font-size:0.82rem;cursor:pointer;transition:all 0.25s;background:transparent;color:rgba(255,255,255,0.4);white-space:nowrap;}
+.tab-btn.active{background:linear-gradient(135deg,#34d399,#5bc8f5);color:#fff;box-shadow:0 4px 16px rgba(52,211,153,0.3);}
+.section-panel{display:none;}.section-panel.active{display:block;}
+
+/* POSE CARDS */
+.pose-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:24px;}
+.pose-card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:18px;padding:20px;cursor:pointer;transition:all 0.25s;position:relative;overflow:hidden;}
+.pose-card::before{content:'';position:absolute;inset:0;border-radius:18px;opacity:0;transition:opacity 0.3s;}
+.pose-card:hover{transform:translateY(-3px);box-shadow:0 10px 30px rgba(0,0,0,0.3);}
+.pose-card:hover::before{opacity:1;}
+.pose-card.yoga::before{background:radial-gradient(ellipse at top,rgba(52,211,153,0.12),transparent 70%);}
+.pose-card.stretch::before{background:radial-gradient(ellipse at top,rgba(92,200,245,0.12),transparent 70%);}
+.pose-card.strength::before{background:radial-gradient(ellipse at top,rgba(167,139,250,0.12),transparent 70%);}
+.pose-card.breathing::before{background:radial-gradient(ellipse at top,rgba(249,168,212,0.12),transparent 70%);}
+.pose-icon{font-size:2.8rem;margin-bottom:10px;line-height:1;}
+.pose-name{font-weight:800;font-size:0.95rem;margin-bottom:4px;}
+.pose-duration{color:rgba(255,255,255,0.4);font-size:0.75rem;margin-bottom:8px;}
+pose-benefit{display:inline-block;padding:3px 10px;border-radius:99px;font-size:0.72rem;font-weight:700;margin-top:4px;}
+.tag-yoga{background:rgba(52,211,153,0.15);color:#34d399;}
+.tag-stretch{background:rgba(92,200,245,0.15);color:#5bc8f5;}
+.tag-strength{background:rgba(167,139,250,0.15);color:#a78bfa;}
+.tag-breathing{background:rgba(249,168,212,0.15);color:#f9a8d4;}
+
+/* MODAL */
+.pose-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:500;align-items:center;justify-content:center;padding:20px;}
+.pose-modal.show{display:flex;}
+.pose-modal-box{background:#111827;border:1px solid rgba(255,255,255,0.1);border-radius:24px;padding:32px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;animation:slideUp 0.4s cubic-bezier(0.16,1,0.3,1);}
+@keyframes slideUp{from{opacity:0;transform:translateY(30px);}to{opacity:1;transform:translateY(0);}}
+.modal-icon{font-size:4rem;text-align:center;margin-bottom:12px;}
+.modal-title{font-family:'Playfair Display',serif;font-size:1.6rem;text-align:center;margin-bottom:6px;}
+.modal-sub{text-align:center;color:rgba(255,255,255,0.4);font-size:0.82rem;margin-bottom:20px;}
+.modal-steps{display:flex;flex-direction:column;gap:10px;margin-bottom:20px;}
+.modal-step{display:flex;gap:12px;padding:12px;background:rgba(255,255,255,0.04);border-radius:12px;}
+.step-num{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#34d399,#5bc8f5);display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:900;flex-shrink:0;}
+.step-text{color:rgba(255,255,255,0.75);font-size:0.88rem;font-weight:600;line-height:1.5;}
+.modal-timer{text-align:center;margin-bottom:16px;}
+.timer-ring{display:inline-flex;flex-direction:column;align-items:center;gap:4px;}
+.timer-count{font-size:3rem;font-weight:900;color:#34d399;line-height:1;}
+.timer-label{color:rgba(255,255,255,0.4);font-size:0.78rem;}
+.modal-actions{display:flex;gap:10px;justify-content:center;}
+.modal-btn{padding:11px 24px;border:none;border-radius:12px;font-family:'Nunito',sans-serif;font-weight:800;font-size:0.88rem;cursor:pointer;transition:all 0.2s;}
+.modal-btn.primary{background:linear-gradient(135deg,#34d399,#5bc8f5);color:#fff;}
+.modal-btn.secondary{background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.6);}
+.modal-btn:hover{transform:translateY(-2px);}
+
+/* WORKOUT BUILDER */
+.workout-wrap{max-width:560px;margin:0 auto;}
+.builder-row{display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap;}
+.builder-label{color:rgba(255,255,255,0.5);font-size:0.82rem;font-weight:700;min-width:80px;}
+.builder-select{padding:8px 14px;background:rgba(255,255,255,0.06);border:1.5px solid rgba(255,255,255,0.12);border-radius:12px;color:#fff;font-family:'Nunito',sans-serif;font-weight:700;font-size:0.88rem;outline:none;cursor:pointer;}
+.workout-plan{display:flex;flex-direction:column;gap:10px;margin-bottom:16px;}
+.workout-exercise{display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:14px;}
+.ex-num{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#34d399,#5bc8f5);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:0.82rem;flex-shrink:0;}
+.ex-info{flex:1;}
+.ex-name{font-weight:800;font-size:0.9rem;margin-bottom:2px;}
+.ex-detail{color:rgba(255,255,255,0.4);font-size:0.75rem;}
+.ex-icon{font-size:1.5rem;}
+.progress-ring{width:36px;height:36px;position:relative;flex-shrink:0;}
+.progress-ring svg{transform:rotate(-90deg);}
+.progress-ring circle{transition:stroke-dashoffset 0.5s;}
+
+/* BREATHING */
+.breathing-wrap{display:flex;flex-direction:column;align-items:center;padding:20px 0;}
+.breath-circle{width:200px;height:200px;border-radius:50%;border:3px solid rgba(52,211,153,0.3);display:flex;align-items:center;justify-content:center;flex-direction:column;margin:0 auto 24px;position:relative;transition:all 1s ease;background:rgba(52,211,153,0.05);}
+.breath-circle.inhale{transform:scale(1.3);border-color:rgba(92,200,245,0.6);background:rgba(92,200,245,0.1);}
+.breath-circle.exhale{transform:scale(0.85);border-color:rgba(249,168,212,0.5);background:rgba(249,168,212,0.05);}
+.breath-circle.hold{border-color:rgba(167,139,250,0.5);background:rgba(167,139,250,0.08);}
+.breath-phase{font-size:1.2rem;font-weight:800;color:#fff;}
+.breath-count{font-size:2.5rem;font-weight:900;color:#34d399;}
+.breath-type-row{display:flex;gap:10px;justify-content:center;margin-bottom:20px;flex-wrap:wrap;}
+.breath-type-btn{padding:8px 16px;border:1.5px solid rgba(255,255,255,0.12);border-radius:20px;background:transparent;color:rgba(255,255,255,0.5);font-family:'Nunito',sans-serif;font-weight:700;font-size:0.8rem;cursor:pointer;transition:all 0.2s;}
+.breath-type-btn.active{background:rgba(52,211,153,0.15);border-color:#34d399;color:#34d399;}
+.breath-instructions{color:rgba(255,255,255,0.4);font-size:0.82rem;text-align:center;margin-bottom:20px;}
+.cycles-count{color:rgba(255,255,255,0.5);font-size:0.85rem;text-align:center;margin-top:16px;}
+</style>
+</head>
+<body>
+<nav class="topnav"><span class="brand">MindSpace 🌿</span><div class="nav-links"><a href="/">🏠 Home</a><a href="/logout">👋 Logout</a></div></nav>
+<div class="page-wrap">
+    <h1 class="page-title">🧘 Physical Activity</h1>
+    <p class="page-sub">Yoga poses, stretches, strength training & breathing exercises</p>
+    <div class="section-tabs">
+        <button class="tab-btn active" onclick="switchTab('yoga',this)">🧘 Yoga Poses</button>
+        <button class="tab-btn" onclick="switchTab('stretch',this)">🤸 Stretches</button>
+        <button class="tab-btn" onclick="switchTab('strength',this)">💪 Strength</button>
+        <button class="tab-btn" onclick="switchTab('breathing',this)">🌬️ Breathing</button>
+        <button class="tab-btn" onclick="switchTab('workout',this)">📋 Workout Plan</button>
+    </div>
+
+    <!-- YOGA -->
+    <div class="section-panel active" id="panel-yoga">
+        <div class="pose-grid" id="yogaGrid"></div>
+    </div>
+    <!-- STRETCH -->
+    <div class="section-panel" id="panel-stretch">
+        <div class="pose-grid" id="stretchGrid"></div>
+    </div>
+    <!-- STRENGTH -->
+    <div class="section-panel" id="panel-strength">
+        <div class="pose-grid" id="strengthGrid"></div>
+    </div>
+    <!-- BREATHING -->
+    <div class="section-panel" id="panel-breathing">
+        <div class="breathing-wrap">
+            <div class="breath-type-row">
+                <button class="breath-type-btn active" onclick="setBreathType('478',this)">4-7-8 Calm</button>
+                <button class="breath-type-btn" onclick="setBreathType('box',this)">Box Breathing</button>
+                <button class="breath-type-btn" onclick="setBreathType('belly',this)">Belly Breath</button>
+                <button class="breath-type-btn" onclick="setBreathType('coherent',this)">Coherent</button>
+            </div>
+            <div class="breath-instructions" id="breathInstructions">4-7-8: Inhale 4s, Hold 7s, Exhale 8s — reduces anxiety fast</div>
+            <div class="breath-circle" id="breathCircle">
+                <div class="breath-phase" id="breathPhase">Press Start</div>
+                <div class="breath-count" id="breathCountNum"></div>
+            </div>
+            <div class="cycles-count" id="cyclesCount">Cycles completed: 0</div>
+            <div style="display:flex;gap:12px;justify-content:center;margin-top:16px;">
+                <button class="modal-btn primary" id="breathStart" onclick="toggleBreath()">▶ Start</button>
+                <button class="modal-btn secondary" onclick="resetBreath()">↺ Reset</button>
+            </div>
+        </div>
+    </div>
+    <!-- WORKOUT PLAN -->
+    <div class="section-panel" id="panel-workout">
+        <div class="workout-wrap">
+            <div class="builder-row">
+                <span class="builder-label">Goal</span>
+                <select class="builder-select" id="wGoal"><option value="calm">Stress Relief</option><option value="energy">Energy Boost</option><option value="strength">Build Strength</option><option value="flex">Flexibility</option></select>
+                <span class="builder-label">Duration</span>
+                <select class="builder-select" id="wDur"><option value="10">10 min</option><option value="20">20 min</option><option value="30">30 min</option></select>
+            </div>
+            <button class="modal-btn primary" onclick="buildWorkout()" style="margin-bottom:20px;">✨ Generate Plan</button>
+            <div class="workout-plan" id="workoutPlan"></div>
+        </div>
+    </div>
+</div>
+<!-- POSE DETAIL MODAL -->
+<div class="pose-modal" id="poseModal">
+    <div class="pose-modal-box">
+        <div class="modal-icon" id="mIcon"></div>
+        <div class="modal-title" id="mTitle"></div>
+        <div class="modal-sub" id="mSub"></div>
+        <div class="modal-steps" id="mSteps"></div>
+        <div class="modal-timer">
+            <div class="timer-ring">
+                <div class="timer-count" id="mTimerNum">—</div>
+                <div class="timer-label" id="mTimerLabel">seconds</div>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="modal-btn primary" id="mStartBtn" onclick="togglePoseTimer()">▶ Start Timer</button>
+            <button class="modal-btn secondary" onclick="closeModal()">✕ Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+function switchTab(tab,btn){document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.section-panel').forEach(p=>p.classList.remove('active'));btn.classList.add('active');document.getElementById('panel-'+tab).classList.add('active');}
+
+const YOGA=[
+    {icon:'🧘',name:'Mountain Pose',sanskrit:'Tadasana',duration:60,benefit:'yoga',desc:'Foundation of all standing poses. Builds awareness and grounding.',steps:['Stand with feet together, weight evenly distributed','Engage thighs, lift kneecaps gently','Lengthen spine, roll shoulders back and down','Arms at sides, palms facing forward','Breathe deeply, hold steady gaze']},
+    {icon:'🌲',name:'Tree Pose',sanskrit:'Vrksasana',duration:45,benefit:'yoga',desc:'Improves balance, focus, and inner calm.',steps:['Stand on one leg, find a fixed gaze point','Place foot on inner thigh or calf (not knee)','Press palms together at heart center','Breathe steadily, engage core','Hold 30–60 seconds each side']},
+    {icon:'🐕',name:'Downward Dog',sanskrit:'Adho Mukha',duration:60,benefit:'yoga',desc:'Energizes the body and stretches the entire back.',steps:['Start on hands and knees','Tuck toes, lift hips up and back','Straighten arms, press palms firmly','Heels move toward floor','Head between arms, neck relaxed']},
+    {icon:'🌍',name:"Child's Pose",sanskrit:'Balasana',duration:90,benefit:'yoga',desc:'Deeply restorative, calms the nervous system.',steps:["Kneel, sit back on heels",'Fold forward, forehead to mat','Arms extended forward or alongside body','Breathe into lower back','Stay 1–3 minutes for deep rest']},
+    {icon:'🐍',name:'Cobra Pose',sanskrit:'Bhujangasana',duration:45,benefit:'yoga',desc:'Opens chest and strengthens the spine.',steps:['Lie face down, hands under shoulders','Elbows close to body','Press into hands, lift chest off floor','Roll shoulders back, open collar bones','Keep lower belly on mat, breathe']},
+    {icon:'⚔️',name:'Warrior I',sanskrit:'Virabhadrasana I',duration:60,benefit:'yoga',desc:'Builds strength, stamina, and confidence.',steps:['Step right foot forward into lunge','Back foot at 45° angle','Front knee over ankle','Raise arms overhead, palms together','Square hips to front, hold steadily']},
+    {icon:'🏹',name:'Warrior II',sanskrit:'Virabhadrasana II',duration:60,benefit:'yoga',desc:'Strengthens legs and opens hips and chest.',steps:['Wide stance, feet 4 feet apart','Front foot forward, back foot 90°','Bend front knee over ankle','Arms extended parallel to floor','Gaze over front fingers, breathe']},
+    {icon:'🌙',name:'Crescent Lunge',sanskrit:'Anjaneyasana',duration:45,benefit:'yoga',desc:'Opens hip flexors, lifts energy.',steps:['Low lunge with back knee down','Lift arms overhead, lengthen spine','Sink hips forward and down','Breathe into front hip crease','Hold and switch sides']}
+];
+const STRETCHES=[
+{icon:'🦵',name:'Hamstring Stretch',duration:45,benefit:'stretch',desc:'Releases tight hamstrings and lower back.',steps:['Sit on floor, legs extended forward','Reach hands toward feet','Keep back straight, fold from hips','Breathe and relax deeper each exhale','Hold 30–60 seconds each side']},
+    {icon:'🔄',name:'Seated Spinal Twist',duration:45,benefit:'stretch',desc:'Relieves spinal tension and improves rotation.',steps:['Sit with legs extended','Bend right knee, foot outside left thigh','Left elbow on right knee','Right hand behind you for support','Twist on each exhale, hold 30s each side']},
+    {icon:'🦈',name:'Hip Flexor Stretch',duration:60,benefit:'stretch',desc:'Counters prolonged sitting, opens hips.',steps:['Kneel on left knee, right foot forward','Push hips gently forward','Lift torso, tuck pelvis slightly','Arms on hips or raised overhead','Hold 45s, breathe, switch sides']},
+    {icon:'🐈',name:'Cat-Cow Stretch',duration:60,benefit:'stretch',desc:'Warms the spine, relieves back tension.',steps:['On all fours, neutral spine','Inhale — drop belly, lift gaze (Cow)','Exhale — round back to ceiling (Cat)','Sync breath with movement','Repeat 8–10 slow cycles']},
+    {icon:'🌿',name:'Chest Opener',duration:45,benefit:'stretch',desc:'Counteracts hunching, opens the chest.',steps:['Clasp hands behind back','Squeeze shoulder blades together','Lift chest, gaze slightly upward','Breathe into chest, feel the opening','Hold 30 seconds, relax and repeat']},
+    {icon:'🦋',name:'Butterfly Stretch',duration:60,benefit:'stretch',desc:'Opens inner thighs and groin gently.',steps:['Sit, soles of feet together','Hold feet with both hands','Gently press knees toward floor','Sit tall, breathe deeply','Lean slightly forward for deeper stretch']}
+];
+const STRENGTH=[
+    {icon:'💥',name:'Push-Ups',duration:30,benefit:'strength',desc:'Upper body strength — chest, shoulders, triceps.',steps:['Hands wider than shoulder width','Body in straight line from head to heels','Lower chest to floor, elbows at 45°','Push back to start explosively','3 sets of 10–15 reps, rest 60s between']},
+    {icon:'🏋️',name:'Bodyweight Squats',duration:40,benefit:'strength',desc:'Builds legs, glutes, and core stability.',steps:['Feet shoulder-width apart, toes slightly out','Arms forward for balance','Sit back and down, knees tracking toes','Thighs parallel to floor at bottom','Drive through heels to stand — 3×15']},
+    {icon:'🦅',name:'Plank Hold',duration:60,benefit:'strength',desc:'Core strength and total body stability.',steps:['Forearms on ground, elbows under shoulders','Body in straight line, hips neutral','Engage abs, glutes, and quads','Breathe steadily, do not hold breath','Hold 30–60 seconds, build over time']},
+    {icon:'🐸',name:'Glute Bridges',duration:45,benefit:'strength',desc:'Activates glutes and relieves lower back.',steps:['Lie on back, knees bent, feet flat','Drive hips up toward ceiling','Squeeze glutes at top, hold 2 seconds','Lower slowly with control','3 sets of 15 reps']},
+    {icon:'🦩',name:'Single-Leg Balance',duration:45,benefit:'strength',desc:'Builds ankle stability and leg strength.',steps:['Stand on one foot, slight knee bend','Raise opposite knee to hip height','Hold 30 seconds, switch legs','Add small hops for challenge','3 sets per leg']},
+    {icon:'🔥',name:'Burpees',duration:30,benefit:'strength',desc:'Full body cardio and strength combined.',steps:['Stand, drop hands to floor','Jump feet back to plank','Do one push-up (optional)','Jump feet forward to hands','Jump up with arms overhead — 10 reps']}
+];
+
+function renderGrid(data,gridId,cls){const grid=document.getElementById(gridId);grid.innerHTML='';data.forEach((p,i)=>{const card=document.createElement('div');card.className=`pose-card ${cls}`;card.innerHTML=`<div class="pose-icon">${p.icon}</div><div class="pose-name">${p.name}</div>${p.sanskrit?`<div class="pose-duration">${p.sanskrit}</div>`:'<div class="pose-duration">&nbsp;</div>'}<div class="pose-duration">⏱ ${p.duration}s</div><span class="pose-benefit tag-${p.benefit}">${p.benefit.charAt(0).toUpperCase()+p.benefit.slice(1)}</span>`;card.onclick=()=>openModal(p);grid.appendChild(card);});}
+renderGrid(YOGA,'yogaGrid','yoga');renderGrid(STRETCHES,'stretchGrid','stretch');renderGrid(STRENGTH,'strengthGrid','strength');
+
+let poseTimerInterval=null,poseTimerRunning=false,poseTimerLeft=0;
+function openModal(p){document.getElementById('mIcon').textContent=p.icon;document.getElementById('mTitle').textContent=p.name;document.getElementById('mSub').textContent=p.desc;document.getElementById('mSteps').innerHTML=p.steps.map((s,i)=>`<div class="modal-step"><div class="step-num">${i+1}</div><div class="step-text">${s}</div></div>`).join('');poseTimerLeft=p.duration;document.getElementById('mTimerNum').textContent=poseTimerLeft;document.getElementById('mTimerLabel').textContent='seconds';document.getElementById('mStartBtn').textContent='▶ Start Timer';poseTimerRunning=false;clearInterval(poseTimerInterval);document.getElementById('poseModal').classList.add('show');}
+function closeModal(){document.getElementById('poseModal').classList.remove('show');clearInterval(poseTimerInterval);poseTimerRunning=false;}
+function togglePoseTimer(){if(poseTimerRunning){clearInterval(poseTimerInterval);poseTimerRunning=false;document.getElementById('mStartBtn').textContent='▶ Resume';}else{poseTimerRunning=true;document.getElementById('mStartBtn').textContent='⏸ Pause';poseTimerInterval=setInterval(()=>{poseTimerLeft--;document.getElementById('mTimerNum').textContent=poseTimerLeft;if(poseTimerLeft<=0){clearInterval(poseTimerInterval);poseTimerRunning=false;document.getElementById('mTimerNum').textContent='✅';document.getElementById('mTimerLabel').textContent='Done!';document.getElementById('mStartBtn').textContent='✅ Complete!';}},1000);}}
+
+// ===== BREATHING ENGINE =====
+const BREATH_TYPES={
+    '478':{phases:['Inhale','Hold','Exhale'],times:[4,7,8],desc:'4-7-8: Inhale 4s, Hold 7s, Exhale 8s — reduces anxiety fast'},
+    'box':{phases:['Inhale','Hold','Exhale','Hold'],times:[4,4,4,4],desc:'Box Breathing: 4s each phase — used by Navy SEALs for focus'},
+    'belly':{phases:['Inhale','Exhale'],times:[5,5],desc:'Belly Breathing: 5s in, 5s out — deepest relaxation response'},
+    'coherent':{phases:['Inhale','Exhale'],times:[5,5],desc:'Coherent: 5-5 rhythm — balances heart rate variability'}
+};
+let breathType='478',breathRunning=false,breathInterval=null,breathPhaseIdx=0,breathSecLeft=0,breathCycles=0;
+function setBreathType(type,btn){breathType=type;document.querySelectorAll('.breath-type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.getElementById('breathInstructions').textContent=BREATH_TYPES[type].desc;resetBreath();}
+function resetBreath(){clearInterval(breathInterval);breathRunning=false;breathPhaseIdx=0;breathCycles=0;breathSecLeft=BREATH_TYPES[breathType].times[0];document.getElementById('breathPhase').textContent='Press Start';document.getElementById('breathCountNum').textContent='';document.getElementById('breathStart').textContent='▶ Start';document.getElementById('cyclesCount').textContent='Cycles completed: 0';document.getElementById('breathCircle').className='breath-circle';}
+function toggleBreath(){if(breathRunning){clearInterval(breathInterval);breathRunning=false;document.getElementById('breathStart').textContent='▶ Resume';}else{breathRunning=true;document.getElementById('breathStart').textContent='⏸ Pause';runBreathStep();breathInterval=setInterval(()=>{breathSecLeft--;if(breathSecLeft<=0){breathPhaseIdx++;const phases=BREATH_TYPES[breathType].phases;if(breathPhaseIdx>=phases.length){breathPhaseIdx=0;breathCycles++;document.getElementById('cyclesCount').textContent=`Cycles completed: ${breathCycles}`;}breathSecLeft=BREATH_TYPES[breathType].times[breathPhaseIdx];runBreathStep();}else{document.getElementById('breathCountNum').textContent=breathSecLeft;}},1000);}}
+function runBreathStep(){const phase=BREATH_TYPES[breathType].phases[breathPhaseIdx];document.getElementById('breathPhase').textContent=phase;document.getElementById('breathCountNum').textContent=breathSecLeft;const circle=document.getElementById('breathCircle');circle.className='breath-circle';if(phase==='Inhale')setTimeout(()=>circle.classList.add('inhale'),50);else if(phase==='Exhale')setTimeout(()=>circle.classList.add('exhale'),50);else setTimeout(()=>circle.classList.add('hold'),50);}
+
+// ===== WORKOUT BUILDER =====
+const ALL_EXERCISES={calm:[{icon:'🌍',name:"Child's Pose",detail:'60s hold'},{icon:'🐈',name:'Cat-Cow Stretch',detail:'10 cycles'},{icon:'🌬️',name:'4-7-8 Breathing',detail:'4 cycles'},{icon:'🧘',name:'Mountain Pose',detail:'60s hold'},{icon:'🔄',name:'Seated Spinal Twist',detail:'45s each side'},{icon:'🌙',name:'Legs Up Wall',detail:'3 minutes'}],
+energy:[{icon:'💥',name:'Jumping Jacks',detail:'3×20 reps'},{icon:'🔥',name:'Burpees',detail:'3×10 reps'},{icon:'🏋️',name:'Bodyweight Squats',detail:'3×15 reps'},{icon:'🦅',name:'High Knees',detail:'3×30s'},{icon:'💥',name:'Push-Ups',detail:'3×12 reps'},{icon:'⚡',name:'Mountain Climbers',detail:'3×20s'}],
+strength:[{icon:'💥',name:'Push-Ups',detail:'4×15 reps'},{icon:'🏋️',name:'Squats',detail:'4×20 reps'},{icon:'🦅',name:'Plank Hold',detail:'3×60s'},{icon:'🐸',name:'Glute Bridges',detail:'3×15 reps'},{icon:'🦩',name:'Lunges',detail:'3×12 each leg'},{icon:'🔥',name:'Tricep Dips',detail:'3×12 reps'}],
+flex:[{icon:'🦋',name:'Butterfly Stretch',detail:'60s hold'},{icon:'🦵',name:'Hamstring Stretch',detail:'45s each side'},{icon:'🦈',name:'Hip Flexor Stretch',detail:'60s each side'},{icon:'🌿',name:'Chest Opener',detail:'45s hold'},{icon:'🐍',name:'Cobra Pose',detail:'30s hold'},{icon:'🐕',name:'Downward Dog',detail:'60s hold'}]};
+function buildWorkout(){const goal=document.getElementById('wGoal').value;const dur=parseInt(document.getElementById('wDur').value);const exes=ALL_EXERCISES[goal];const count=dur===10?4:dur===20?6:8;const selected=exes.slice(0,Math.min(count,exes.length));const plan=document.getElementById('workoutPlan');plan.innerHTML='';selected.forEach((e,i)=>{plan.innerHTML+=`<div class="workout-exercise"><div class="ex-num">${i+1}</div><div class="ex-info"><div class="ex-name">${e.name}</div><div class="ex-detail">${e.detail}</div></div><div class="ex-icon">${e.icon}</div></div>`;});if(!plan.innerHTML)plan.innerHTML='<p style="color:rgba(255,255,255,0.4);text-align:center;padding:20px;">Select options above and click Generate!</p>';}
+buildWorkout();
+</script>
+</body></html>
+""")
+
+
     return redirect("/games")  # redirect to games as placeholder
 
 # ─────────────────────────────────────────────
