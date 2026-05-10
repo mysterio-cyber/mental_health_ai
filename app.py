@@ -9,7 +9,7 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False
 
 # ── Anthropic API key (set via environment variable) ──────────────────────────
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY = "'sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn'"
 
 def init_db():
     conn = sqlite3.connect("app.db")
@@ -1002,7 +1002,7 @@ Important: Keep responses short and supportive, not lecture-like."""
     api_messages.append({"role": "user", "content": user_msg})
 
     payload = json.dumps({
-        "model": "claude-haiku-4-5-20251001",
+        "model": "claude-haiku-4-5",
         "max_tokens": 300,
         "system": system_prompt,
         "messages": api_messages
@@ -1086,10 +1086,10 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 <div class="chat-header">
     <div class="bot-avatar">🤖</div>
     <div>
-        <div class="bot-name">Sage — Your AI Companion{% if has_api %}<span class="ai-badge">✦ Claude AI</span>{% endif %}</div>
+        <div class="bot-name">TARA — Your AI Companion{% if has_api %}<span class="ai-badge">✦ Claude AI</span>{% endif %}</div>
         <div class="bot-status"><span class="status-dot"></span> Always here for you</div>
     </div>
-    <div class="disclaimer">Not a substitute for professional therapy. For emergencies call iCall: 9152987821</div>
+    <div class="disclaimer">Not a substitute for professional therapy. For emergencies call iCall: 9866167607</div>
 </div>
 <div class="messages" id="messages"></div>
 <div class="quick-replies" id="quickReplies">
