@@ -903,7 +903,13 @@ def api_emotion():
 # FEATURE 2 — AI CHATBOT THERAPIST (Claude-powered with fallback)
 # ─────────────────────────────────────────────
 
-# Rule-based fallback responses
+import random
+import json
+import urllib.request
+
+# ─────────────────────────────────────────────
+# RULE-BASED FALLBACK RESPONSES
+# ─────────────────────────────────────────────
 THERAPIST_RESPONSES = {
     "greet": [
         "Hello 💙 I'm so glad you reached out. How are you feeling today?",
@@ -955,32 +961,36 @@ THERAPIST_RESPONSES = {
     ]
 }
 
+
 def rule_based_reply(user_msg: str) -> str:
     msg = user_msg.lower()
-    crisis_words = ["suicide","kill myself","end my life","self harm","hurt myself","want to die","can't go on","no reason to live"]
+    crisis_words = ["suicide", "kill myself", "end my life", "self harm", "hurt myself",
+                    "want to die", "can't go on", "no reason to live"]
     if any(w in msg for w in crisis_words):
         return random.choice(THERAPIST_RESPONSES["crisis"])
-    if any(w in msg for w in ["hello","hi ","hey ","good morning","good evening","howdy","sup "]):
+    if any(w in msg for w in ["hello", "hi ", "hey ", "good morning", "good evening", "howdy", "sup "]):
         return random.choice(THERAPIST_RESPONSES["greet"])
-    if any(w in msg for w in ["help","support","dont know","don't know","lost","confused","what do i do"]):
+    if any(w in msg for w in ["help", "support", "dont know", "don't know", "lost", "confused", "what do i do"]):
         return random.choice(THERAPIST_RESPONSES["help"])
-    if any(w in msg for w in ["stress","overwhelm","pressure","too much","can't cope","cant cope"]):
+    if any(w in msg for w in ["stress", "overwhelm", "pressure", "too much", "can't cope", "cant cope"]):
         return random.choice(THERAPIST_RESPONSES["stress"])
-    if any(w in msg for w in ["anxious","anxiety","panic","fear","worried","scared"]):
+    if any(w in msg for w in ["anxious", "anxiety", "panic", "fear", "worried", "scared"]):
         return random.choice(THERAPIST_RESPONSES["anxiety"])
-    if any(w in msg for w in ["sad","depress","cry","lonely","empty","hopeless","miserable"]):
+    if any(w in msg for w in ["sad", "depress", "cry", "lonely", "empty", "hopeless", "miserable"]):
         return random.choice(THERAPIST_RESPONSES["sadness"])
-    if any(w in msg for w in ["angry","anger","furious","rage","frustrated","irritated","mad"]):
+    if any(w in msg for w in ["angry", "anger", "furious", "rage", "frustrated", "irritated", "mad"]):
         return random.choice(THERAPIST_RESPONSES["anger"])
-    if any(w in msg for w in ["happy","great","amazing","wonderful","excited","joy","good","fantastic"]):
+    if any(w in msg for w in ["happy", "great", "amazing", "wonderful", "excited", "joy", "good", "fantastic"]):
         return random.choice(THERAPIST_RESPONSES["happiness"])
-    if any(w in msg for w in ["sleep","insomnia","tired","fatigue","rest","awake","cant sleep"]):
+    if any(w in msg for w in ["sleep", "insomnia", "tired", "fatigue", "rest", "awake", "cant sleep"]):
         return random.choice(THERAPIST_RESPONSES["sleep"])
     return random.choice(THERAPIST_RESPONSES["default"])
 
-def claude_chat_reply(messages_history: list, user_msg: str) -> str:
+
+def claude_chat_reply(messages_history: list, user_msg: str, api_key: str = None) -> str:
     """Call Claude API for intelligent therapy responses."""
-    if not ANTHROPIC_API_KEY:
+    # FIX 1: Pass api_key as parameter instead of relying on global
+    if not api_key:
         return rule_based_reply(user_msg)
 
     system_prompt = """You are Sage, a compassionate AI mental wellness companion built into MindSpace — a wellness app. Your role is to:
@@ -995,11 +1005,17 @@ def claude_chat_reply(messages_history: list, user_msg: str) -> str:
 
 Important: Keep responses short and supportive, not lecture-like."""
 
+    # FIX 2: Correctly build API messages — only include role:user and role:assistant
+    # Strip out any messages with unexpected roles
     api_messages = []
-    # Include last 6 messages for context
     for m in messages_history[-6:]:
-        api_messages.append({"role": m["role"], "content": m["content"]})
-    api_messages.append({"role": "user", "content": user_msg})
+        if m.get("role") in ("user", "assistant") and m.get("content", "").strip():
+            api_messages.append({"role": m["role"], "content": m["content"]})
+
+    # FIX 3: Only append user message if not already last in history
+    # (prevents double-sending on quick replies)
+    if not api_messages or api_messages[-1]["content"] != user_msg:
+        api_messages.append({"role": "user", "content": user_msg})
 
     payload = json.dumps({
         "model": "claude-haiku-4-5",
@@ -1014,7 +1030,7 @@ Important: Keep responses short and supportive, not lecture-like."""
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "x-api-key": ANTHROPIC_API_KEY,
+                "x-api-key": api_key,
                 "anthropic-version": "2023-06-01"
             },
             method="POST"
@@ -1022,15 +1038,15 @@ Important: Keep responses short and supportive, not lecture-like."""
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             return result["content"][0]["text"]
-    except Exception:
+    except Exception as e:
+        print(f"Claude API error: {e}")   # FIX 4: Log the actual error for debugging
         return rule_based_reply(user_msg)
 
-@app.route("/chat")
-def chat_page():
-    if "user" not in session:
-        return redirect("/login")
-    has_api = bool(ANTHROPIC_API_KEY)
-    return render_template_string("""
+
+# ─────────────────────────────────────────────
+# CHAT PAGE HTML TEMPLATE (drop-in replacement)
+# ─────────────────────────────────────────────
+CHAT_PAGE_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
@@ -1079,6 +1095,8 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .chat-input::placeholder{color:rgba(255,255,255,0.3);}
 .send-btn{width:46px;height:46px;border-radius:50%;border:none;background:linear-gradient(135deg,#6366f1,#a78bfa);color:#fff;font-size:1.2rem;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
 .send-btn:hover{transform:scale(1.1);box-shadow:0 4px 16px rgba(99,102,241,0.4);}
+/* FIX 5: Disable send button while waiting for response */
+.send-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
 </style>
 </head>
 <body>
@@ -1089,7 +1107,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
         <div class="bot-name">TARA — Your AI Companion{% if has_api %}<span class="ai-badge">✦ Claude AI</span>{% endif %}</div>
         <div class="bot-status"><span class="status-dot"></span> Always here for you</div>
     </div>
-    <div class="disclaimer">Not a substitute for professional therapy. For emergencies call iCall: 9866167607</div>
+    <div class="disclaimer">Not a substitute for professional therapy. For emergencies call iCall: 9152987821</div>
 </div>
 <div class="messages" id="messages"></div>
 <div class="quick-replies" id="quickReplies">
@@ -1101,43 +1119,162 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
     <button class="qr-btn" onclick="quickSend('I need some help')">🙏 I need help</button>
 </div>
 <div class="input-row">
-    <input class="chat-input" id="chatInput" placeholder="Share what's on your mind…" onkeydown="if(event.key==='Enter')sendMsg()">
-    <button class="send-btn" onclick="sendMsg()">➤</button>
+    <input class="chat-input" id="chatInput" placeholder="Share what's on your mind…" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendMsg();}">
+    <button class="send-btn" id="sendBtn" onclick="sendMsg()">➤</button>
 </div>
 <script>
-const messagesEl=document.getElementById('messages');
-let chatHistory=[];
-function nowTime(){const d=new Date();return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');}
-function addMsg(text,role){
-    const div=document.createElement('div');div.className='msg '+role;
-    div.innerHTML=`<div class="bubble">${text}</div><div class="msg-time">${nowTime()}</div>`;
-    messagesEl.appendChild(div);messagesEl.scrollTop=messagesEl.scrollHeight;
-    chatHistory.push({role:role==='bot'?'assistant':'user',content:text});
+const messagesEl = document.getElementById('messages');
+const sendBtn = document.getElementById('sendBtn');
+const chatInput = document.getElementById('chatInput');
+
+// FIX 6: Keep history as a proper array, never include the initial greeting
+let chatHistory = [];
+let isSending = false;  // FIX 7: Guard against double-sends
+
+function nowTime() {
+    const d = new Date();
+    return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
 }
-function showTyping(){const div=document.createElement('div');div.className='msg bot';div.id='typing';div.innerHTML=`<div class="typing-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;messagesEl.appendChild(div);messagesEl.scrollTop=messagesEl.scrollHeight;}
-function removeTyping(){const t=document.getElementById('typing');if(t)t.remove();}
-async function sendMsg(){
-    const input=document.getElementById('chatInput');const text=input.value.trim();if(!text)return;
-    input.value='';document.getElementById('quickReplies').style.display='none';
-    addMsg(text,'user');showTyping();
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,history:chatHistory.slice(-10)})});
-    const d=await res.json();removeTyping();addMsg(d.reply,'bot');
+
+// FIX 8: Escape HTML to prevent XSS from API responses
+function escapeHTML(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 }
-function quickSend(text){document.getElementById('chatInput').value=text;sendMsg();}
-setTimeout(()=>{addMsg('Hello {{ session["user"] }} 💙 I\'m Sage, your calm AI companion. This is a safe, judgement-free space. How are you feeling today?','bot');},400);
+
+function addMsg(text, role, skipHistory) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + role;
+    // Allow emojis but escape everything else
+    div.innerHTML = `<div class="bubble">${escapeHTML(text)}</div><div class="msg-time">${nowTime()}</div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    // FIX 9: skipHistory flag so greeting doesn't pollute API context
+    if (!skipHistory) {
+        chatHistory.push({ role: role === 'bot' ? 'assistant' : 'user', content: text });
+    }
+}
+
+function showTyping() {
+    const div = document.createElement('div');
+    div.className = 'msg bot';
+    div.id = 'typing';
+    div.innerHTML = `<div class="typing-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function removeTyping() {
+    const t = document.getElementById('typing');
+    if (t) t.remove();
+}
+
+async function sendMsg() {
+    // FIX 10: Prevent double sends
+    if (isSending) return;
+    const text = chatInput.value.trim();
+    if (!text) return;
+
+    isSending = true;
+    sendBtn.disabled = true;
+    chatInput.value = '';
+
+    // Hide quick replies after first use
+    document.getElementById('quickReplies').style.display = 'none';
+
+    addMsg(text, 'user');
+    showTyping();
+
+    try {
+        // FIX 11: Send only last 10 messages (exclude greeting via skipHistory)
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, history: chatHistory.slice(-10) })
+        });
+
+        if (!res.ok) {
+            throw new Error('Server returned ' + res.status);
+        }
+
+        const d = await res.json();
+        removeTyping();
+
+        if (d.reply) {
+            addMsg(d.reply, 'bot');
+        } else if (d.error) {
+            addMsg('Something went wrong. Please try again.', 'bot');
+        }
+    } catch (err) {
+        removeTyping();
+        console.error('Chat error:', err);
+        addMsg('Sorry, I had trouble connecting. Please try again. 💙', 'bot');
+    } finally {
+        isSending = false;
+        sendBtn.disabled = false;
+        chatInput.focus();
+    }
+}
+
+// FIX 12: quickSend now just sets input and calls sendMsg (no duplication)
+function quickSend(text) {
+    chatInput.value = text;
+    sendMsg();
+}
+
+// FIX 13: Greeting shown with skipHistory=true so it doesn't appear in API context
+setTimeout(() => {
+    addMsg('Hello {{ session["user"] }} 💙 I\'m TARA, your calm AI companion. This is a safe, judgement-free space. How are you feeling today?', 'bot', true);
+}, 400);
 </script>
 </body></html>
-""", has_api=has_api)
+"""
+
+
+# ─────────────────────────────────────────────
+# FLASK ROUTES — replace your existing /chat and /api/chat
+# ─────────────────────────────────────────────
+
+# In your Flask app, replace the /chat and /api/chat routes with these:
+
+"""
+from flask import Flask, render_template_string, request, jsonify, session, redirect
+import os
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
+ANTHROPIC_API_KEY = "'sk-proj-rJ19DXcrkLNtqWnvhfDZT3BlbkFJ7iMszPYcYuGIgr299JRn'"
+
+
+
+@app.route("/chat")
+def chat_page():
+    if "user" not in session:
+        return redirect("/login")
+    has_api = bool(ANTHROPIC_API_KEY)
+    return render_template_string(CHAT_PAGE_TEMPLATE, has_api=has_api)
+
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     if "user" not in session:
         return jsonify({"error": "Not logged in"}), 401
+
     data = request.get_json()
-    msg = data.get("message","")
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    msg = data.get("message", "").strip()
+    if not msg:
+        return jsonify({"error": "Empty message"}), 400
+
     history = data.get("history", [])
-    reply = claude_chat_reply(history, msg)
+
+    # FIX: Pass API key explicitly, not via global
+    reply = claude_chat_reply(history, msg, api_key=ANTHROPIC_API_KEY)
     return jsonify({"reply": reply})
+"""
 
 # ─────────────────────────────────────────────
 # FEATURE 3 — MOOD TRACKER
