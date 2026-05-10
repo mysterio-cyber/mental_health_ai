@@ -2053,7 +2053,6 @@ buildWorkout();
 # ─────────────────────────────────────────────
 # PROFILE
 # ─────────────────────────────────────────────
-
 @app.route("/profile")
 def profile():
     if "user" not in session:
@@ -2066,30 +2065,23 @@ def profile():
     count = cur.fetchone()[0]
     cur.execute("SELECT AVG(score) FROM results WHERE username=?", (session["user"],))
     avg = cur.fetchone()[0]
-    cur.execute("SELECT COUNT(*) FROM mood_logs WHERE username=?", (session["user"],))
-    mood_count = cur.fetchone()[0]
     conn.close()
     return render_template_string("""
 <!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>MindSpace — Profile</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-<style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Nunito',sans-serif;min-height:100vh;background:#0d0d1a;color:#fff;display:flex;flex-direction:column;align-items:center;padding:90px 16px 40px;position:relative;}body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 20% 40%,rgba(100,200,255,0.1) 0%,transparent 60%);animation:aurora 10s ease-in-out infinite alternate;pointer-events:none;}@keyframes aurora{0%{transform:scale(1);}100%{transform:scale(1.08) rotate(-2deg);}}
+<style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Nunito',sans-serif;min-height:100vh;background:#0d0d1a;color:#fff;display:flex;flex-direction:column;align-items:center;padding:90px 16px 40px;position:relative;}body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 20% 40%,rgba(100,200,255,0.1) 0%,transparent 60%),radial-gradient(ellipse 60% 80% at 80% 20%,rgba(180,120,255,0.1) 0%,transparent 60%);animation:aurora 10s ease-in-out infinite alternate;pointer-events:none;}@keyframes aurora{0%{transform:scale(1);}100%{transform:scale(1.08) rotate(-2deg);}}
 .topnav{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:rgba(13,13,26,0.85);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,0.07);z-index:100;}.brand{font-family:'Playfair Display',serif;font-size:1.2rem;color:#fff;}.nav-links a{color:rgba(255,255,255,0.5);text-decoration:none;font-size:0.82rem;font-weight:700;margin-left:12px;padding:6px 14px;border-radius:20px;border:1px solid rgba(255,255,255,0.1);transition:all 0.2s;}.nav-links a:hover{color:#fff;background:rgba(255,255,255,0.08);}
-.profile-card{position:relative;z-index:1;background:rgba(255,255,255,0.04);backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,0.09);border-radius:28px;padding:36px;width:100%;max-width:440px;}
+.profile-card{position:relative;z-index:1;background:rgba(255,255,255,0.04);backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,0.09);border-radius:28px;padding:36px;width:100%;max-width:420px;animation:slideUp 0.7s cubic-bezier(0.16,1,0.3,1) both;}@keyframes slideUp{from{opacity:0;transform:translateY(30px);}to{opacity:1;transform:translateY(0);}}
 .avatar{width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#5bc8f5,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:2.5rem;font-weight:900;color:#fff;margin:0 auto 16px;}.profile-name{font-family:'Playfair Display',serif;font-size:1.6rem;text-align:center;margin-bottom:4px;}.profile-mobile{text-align:center;color:rgba(255,255,255,0.4);font-size:0.85rem;margin-bottom:24px;}
-.stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:24px;}.stat-box{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:14px;text-align:center;}.stat-val{font-size:1.4rem;font-weight:900;background:linear-gradient(135deg,#5bc8f5,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}.stat-label{font-size:0.7rem;color:rgba(255,255,255,0.4);margin-top:4px;}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px;}.stat-box{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:16px;text-align:center;}.stat-val{font-size:1.6rem;font-weight:900;background:linear-gradient(135deg,#5bc8f5,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}.stat-label{font-size:0.75rem;color:rgba(255,255,255,0.4);margin-top:4px;}
 .back-btn{display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border:1.5px solid rgba(255,255,255,0.12);border-radius:99px;color:rgba(255,255,255,0.6);text-decoration:none;font-weight:700;font-size:0.85rem;transition:all 0.2s;background:rgba(255,255,255,0.04);}.back-btn:hover{color:#fff;background:rgba(255,255,255,0.08);}
 </style></head><body>
 <nav class="topnav"><span class="brand">MindSpace 🌿</span><div class="nav-links"><a href="/">🏠 Home</a><a href="/logout">👋 Logout</a></div></nav>
 <div class="profile-card"><div class="avatar">{{ user[0][0].upper() }}</div><div class="profile-name">{{ user[0] }}</div><div class="profile-mobile">📱 {{ user[1] or 'No mobile on file' }}</div>
-<div class="stats-grid">
-<div class="stat-box"><div class="stat-val">{{ count }}</div><div class="stat-label">Check-ins</div></div>
-<div class="stat-box"><div class="stat-val">{{ "%.0f"|format(avg) if avg else '—' }}</div><div class="stat-label">Avg Score</div></div>
-<div class="stat-box"><div class="stat-val">{{ mood_count }}</div><div class="stat-label">Mood Logs</div></div>
-</div>
+<div class="stats-grid"><div class="stat-box"><div class="stat-val">{{ count }}</div><div class="stat-label">Total Check-ins</div></div><div class="stat-box"><div class="stat-val">{{ "%.0f"|format(avg) if avg else '—' }}</div><div class="stat-label">Avg. Wellness Score</div></div></div>
 <a class="back-btn" href="/">← Back to Home</a></div>
 </body></html>
-""", user=user, count=count, avg=avg, mood_count=mood_count)
-
+""", user=user, count=count, avg=avg)
 # ─────────────────────────────────────────────
 # SETTINGS
 # ─────────────────────────────────────────────
